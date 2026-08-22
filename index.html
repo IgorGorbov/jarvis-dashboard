@@ -38,10 +38,16 @@
   button.primary { background:#21365e; border-color:#2e4a7d; color:#cfdcfb; }
   button:disabled { color:var(--faint); background:transparent; cursor:default; }
 
-  .body { flex:1; display:grid; grid-template-columns:210px 1fr 300px; min-height:0; }
+  .body { flex:1; display:grid; grid-template-columns:auto 1fr auto; min-height:0; }
   .rail, .side { background:var(--panel); overflow-y:auto; }
-  .rail { border-right:1px solid var(--line); }
-  .side { border-left:1px solid var(--line); padding:.6rem .7rem; }
+  /* Колонки закреплены явно: без этого скрытая панель освобождает дорожку, и
+     центр переезжает в `auto`-колонку, сжимаясь по содержимому вместо 1fr. */
+  .rail { grid-column:1; width:210px; border-right:1px solid var(--line); }
+  .main { grid-column:2; }
+  .side { grid-column:3; width:300px; border-left:1px solid var(--line); padding:.6rem .7rem; }
+  .rail.off, .side.off { display:none; }
+  .toggle { color:var(--dim); padding:.22rem .55rem; }
+  .toggle.off { color:var(--faint); background:transparent; }
   .label {
     font-size:10px; letter-spacing:.12em; text-transform:uppercase;
     color:var(--faint); padding:.6rem .8rem .3rem;
@@ -142,6 +148,8 @@
   <span class="brand">Jarvis</span>
   <span class="pill" id="state"><i class="dot"></i> состояние…</span>
   <span class="spacer"></span>
+  <button type="button" class="toggle" id="toggle-rail" aria-pressed="true">Прогоны</button>
+  <button type="button" class="toggle" id="toggle-side" aria-pressed="true">Артефакты</button>
   <button class="primary" id="start-open">Запустить задачу</button>
   <button disabled title="cancelTask в агенте пока пустой">Остановить</button>
 </div>
@@ -532,6 +540,24 @@ stream.onmessage = (message) => {
     // Строка не разобралась — журнал мог дописываться в момент чтения.
   }
 };
+
+/** Свернутость панелей переживает перезагрузку: это настройка рабочего места. */
+function setupToggle(id, panel, key) {
+  const button = el(id);
+  const apply = (off) => {
+    el(panel).classList.toggle('off', off);
+    button.classList.toggle('off', off);
+    button.setAttribute('aria-pressed', String(!off));
+  };
+  apply(localStorage.getItem(key) === 'off');
+  button.onclick = () => {
+    const off = !el(panel).classList.contains('off');
+    localStorage.setItem(key, off ? 'off' : 'on');
+    apply(off);
+  };
+}
+setupToggle('toggle-rail', 'rail', 'panel.rail');
+setupToggle('toggle-side', 'side', 'panel.side');
 
 el('start-open').onclick = () => el('start').showModal();
 el('start-form').onsubmit = async (submit) => {
