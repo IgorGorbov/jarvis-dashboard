@@ -43,14 +43,19 @@ export const normalizeOutcome = (result, meta) => {
 };
 
 /**
- * Что сказал агент: конверт A2A встречается в двух формах. Отдаём текст как есть,
- * а отказ ли это — решает вызывающий по префиксу `NO_ACTION`.
+ * Что сказал агент. Формы проверены на живом агенте: JSON-RPC заворачивает ответ
+ * в `result`, REST отдаёт сообщение без обёртки, а часть текста лежит в `text`
+ * (форма `content.$case` — это запрос, не ответ; оставлена как запас).
  */
 export const agentText = (payload) => {
-  const parts = payload?.result?.parts ?? payload?.result?.message?.parts ?? [];
-  const said = parts
-    .map((part) => part?.content?.value)
+  const message = payload?.result?.message ?? payload?.result ?? payload?.message;
+  const said = (message?.parts ?? [])
+    .map((part) => part?.text ?? part?.content?.value)
     .filter((value) => typeof value === 'string')
     .join('\n');
   return said || undefined;
 };
+
+/** Ошибка протокола: без этого неверный конверт выглядел как успешная отправка. */
+export const agentError = (payload) =>
+  payload?.error?.message ?? payload?.error?.status ?? undefined;

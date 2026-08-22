@@ -1,6 +1,6 @@
 import {test} from 'node:test';
 import assert from 'node:assert/strict';
-import {agentText, normalizeOutcome, splitRunDir} from './lib.mjs';
+import {agentError, agentText, normalizeOutcome, splitRunDir} from './lib.mjs';
 
 test('splitRunDir делит по первому дефису, а не по последнему', () => {
   assert.deepEqual(splitRunDir('aa940ed9-FM-6324'), {
@@ -68,18 +68,36 @@ test('исход: нечего разбирать', () => {
   assert.equal(normalizeOutcome({}, {}), undefined);
 });
 
-test('текст агента достаётся из обеих форм конверта', () => {
+test('текст агента: формы, снятые с живого агента', () => {
+  // JSON-RPC: сообщение внутри result, текст части — в `text`.
   assert.equal(
-    agentText({result: {parts: [{content: {value: 'NO_ACTION: по FM-1 нет вопроса'}}]}}),
-    'NO_ACTION: по FM-1 нет вопроса',
+    agentText({
+      result: {
+        message: {parts: [{text: 'NO_ACTION: по FM-6301 нечего отменять.', mediaType: 'text/plain'}]},
+      },
+    }),
+    'NO_ACTION: по FM-6301 нечего отменять.',
   );
-  // Вторая форма — сообщение внутри result.
+  // REST: то же сообщение без обёртки result.
   assert.equal(
-    agentText({result: {message: {parts: [{content: {value: 'Отменяю FM-2'}}]}}}),
-    'Отменяю FM-2',
+    agentText({message: {parts: [{text: 'Отменяю FM-2 — работа сохранится в stash.'}]}}),
+    'Отменяю FM-2 — работа сохранится в stash.',
   );
-  // Успех тоже возвращается: отмена сообщает по делу, а не только отказывает.
+  // Запас на форму запроса: content.$case.
   assert.equal(agentText({result: {parts: [{content: {value: 'PR открыт'}}]}}), 'PR открыт');
   assert.equal(agentText(undefined), undefined);
-  assert.equal(agentText({result: {parts: []}}), undefined);
+  assert.equal(agentText({result: {message: {parts: []}}}), undefined);
+});
+
+test('ошибка протокола не выглядит успешной отправкой', () => {
+  // Ровно тот отказ, на который панель отвечала «отправлено».
+  assert.equal(
+    agentError({
+      jsonrpc: '2.0',
+      error: {code: -32009, message: "The requested A2A protocol version '0.3' is not supported."},
+    }),
+    "The requested A2A protocol version '0.3' is not supported.",
+  );
+  assert.equal(agentError({error: {code: 400, status: 'FAILED_PRECONDITION'}}), 'FAILED_PRECONDITION');
+  assert.equal(agentError({result: {message: {parts: []}}}), undefined);
 });

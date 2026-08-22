@@ -3,7 +3,7 @@ import {createServer} from 'node:http';
 import {readFile, readdir, stat, open} from 'node:fs/promises';
 import path from 'node:path';
 import {fileURLToPath} from 'node:url';
-import {agentText, normalizeOutcome, splitRunDir} from './lib.mjs';
+import {agentError, agentText, normalizeOutcome, splitRunDir} from './lib.mjs';
 
 const HERE = path.dirname(fileURLToPath(import.meta.url));
 const ROOT = path.resolve(
@@ -231,10 +231,12 @@ const sourceOf = (issueId) =>
  * приехать только отказ («занят», «нет вопроса»), и его показываем.
  */
 const callAgent = async (res, metadata, text) => {
+  // Проверено на живом агенте: без заголовка версии запрос читается как 0.3 и
+  // отбивается, а метод в 1.0 называется `SendMessage`, не `message/send`.
   const envelope = {
     jsonrpc: '2.0',
     id: Date.now(),
-    method: 'message/send',
+    method: 'SendMessage',
     params: {
       message: {
         messageId: crypto.randomUUID(),
@@ -250,11 +252,16 @@ const callAgent = async (res, metadata, text) => {
   try {
     const upstream = await fetch(`${AGENT}/a2a/jsonrpc`, {
       method: 'POST',
-      headers: {'content-type': 'application/json'},
+      headers: {'content-type': 'application/json', 'a2a-version': '1.0'},
       body: JSON.stringify(envelope),
       signal: controller.signal,
     });
     const payload = await upstream.json().catch(() => undefined);
+    // Без этого неверный конверт выглядел как успешная отправка.
+    const failed = agentError(payload);
+    if (failed) {
+      return sendJson(res, {sent: false, note: `агент не принял запрос: ${failed}`});
+    }
     // Отмена отвечает быстро и по делу («работа сохранится в stash»), поэтому
     // показываем текст агента и при успехе, а не только отказ.
     const said = agentText(payload);
