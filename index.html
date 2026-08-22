@@ -56,7 +56,11 @@
   }
   .runs button.sel { border-color:var(--text); }
   .runs button:focus-visible { outline:2px solid var(--accent); outline-offset:1px; }
-  .pr { font-size:11px; }
+  .pr { font-size:11px; cursor:copy; }
+  .runs .more {
+    height:8px; padding:0 3px; font-size:9px; line-height:8px; color:var(--faint);
+    background:transparent; border-color:var(--line);
+  }
 
   .main { display:flex; flex-direction:column; min-width:0; }
   .strip {
@@ -77,6 +81,21 @@
   }
   .quiet { margin-left:auto; color:var(--faint); font-size:11px; }
   .quiet.stale { color:var(--warn); }
+
+  .asked {
+    border-bottom:1px solid var(--line); background:#1a1710;
+    padding:.6rem .9rem; font-size:11px;
+  }
+  .asked h3 { margin:0 0 .35rem; font-size:11px; font-weight:500; color:var(--warn); }
+  .asked ol { margin:.2rem 0 .5rem; padding-left:1.1rem; color:var(--text); }
+  .asked li { margin:.2rem 0; }
+  .asked textarea {
+    width:100%; height:4rem; font:inherit; resize:vertical;
+    background:var(--bg); color:var(--text); border:1px solid var(--line);
+    border-radius:4px; padding:.3rem .4rem;
+  }
+  .asked .foot { display:flex; gap:.5rem; align-items:center; margin-top:.4rem; }
+  .asked .hint { color:var(--faint); }
 
   .feed { flex:1; overflow-y:auto; padding:.4rem 0; }
   .row { display:grid; grid-template-columns:66px 96px 1fr; gap:.5rem; padding:.09rem .9rem; }
@@ -126,6 +145,7 @@
   <div class="rail" id="rail"></div>
   <div class="main">
     <div class="strip" id="strip"></div>
+    <div id="asked"></div>
     <div class="feed" id="feed"></div>
   </div>
   <div class="side" id="side"></div>
@@ -159,6 +179,10 @@ let snapshot = {phase: 'unknown'};
 let selected = null;
 let detail = null;
 let railSignature = '';
+let askedSignature = '';
+// Полосок на задачу: у FM-6347 их уже 15, и без предела ряд превращается в стену.
+const BARS = 10;
+const expanded = new Set();
 
 const el = (id) => document.getElementById(id);
 const hhmmss = (iso) => new Date(iso).toTimeString().slice(0, 8);
@@ -166,6 +190,25 @@ const secs = (ms) => (ms >= 60000 ? `${Math.round(ms / 60000)} мин` : `${(ms 
 const esc = (s) => String(s ?? '').replace(/[<>&]/g, (c) => ({'<':'&lt;','>':'&gt;','&':'&amp;'}[c]));
 
 const mine = () => events.filter((e) => e.runTag === selected);
+
+/** Ссылка на PR нужна чаще для вставки, чем для перехода: клик копирует. */
+const prLink = (url, text, about) =>
+  `<a class="pr" data-copy href="${esc(url)}" target="_blank" rel="noreferrer"
+      title="${esc(about ? about + '. ' : '')}клик — скопировать, ⌘/Ctrl+клик — открыть">${esc(text)}</a>`;
+
+document.addEventListener('click', (click) => {
+  const link = click.target.closest?.('a[data-copy]');
+  if (!link || click.metaKey || click.ctrlKey || click.shiftKey) return;
+  click.preventDefault();
+  const was = link.textContent;
+  navigator.clipboard.writeText(link.href).then(
+    () => {
+      link.textContent = 'скопировано';
+      setTimeout(() => { link.textContent = was; }, 900);
+    },
+    () => window.open(link.href, '_blank', 'noreferrer'),
+  );
+});
 const tone = (id) => (STOP.has(id) ? 'stop' : HOLD.has(id) ? 'hold' : 'ok');
 
 /* ---------- лента ---------- */
@@ -254,27 +297,46 @@ function renderRail() {
 
   // Перерисовка рвёт фокус на кнопке прогона, поэтому только при настоящем
   // изменении списка, а не на каждом опросе.
-  const signature = runs.map((r) => `${r.runTag}:${r.outcome?.kind ?? ''}`).join('|') + `#${selected}`;
+  const signature = runs.map((r) => `${r.runTag}:${r.outcome?.kind ?? ''}`).join('|')
+    + `#${selected}#${[...expanded].sort().join(',')}`;
   if (signature === railSignature) return;
   railSignature = signature;
 
   el('rail').innerHTML = '<div class="label">Прогоны</div>' + [...byTask].map(([task, list]) => {
-    const pr = list.find((r) => r.outcome?.prUrl);
+    // Ссылка одна на задачу, но принадлежит конкретному прогону — самому свежему
+    // с PR. Поэтому подписываем номером и называем прогон в подсказке.
+    const prs = list.filter((r) => r.outcome?.prUrl);
+    const open = expanded.has(task);
+    const shown = open ? list : list.slice(0, BARS);
+    const hidden = list.length - shown.length;
     return `<div class="task">
       <div class="task-head"><span>${esc(task)}</span><span>${list.length}</span></div>
-      <div class="runs">${list.map((r) =>
+      <div class="runs">${shown.map((r) =>
         `<button type="button"
             title="${esc(r.runTag)} · ${esc(r.outcome?.kind ?? 'без исхода')}"
             aria-label="прогон ${esc(r.runTag)}, исход ${esc(r.outcome?.kind ?? 'неизвестен')}"
             data-tag="${esc(r.runTag)}"
             class="${r.runTag === selected ? 'sel' : ''}"
-            style="background:${colour(r)}"></button>`).join('')}</div>
-      ${pr ? `<a class="pr" href="${esc(pr.outcome.prUrl)}" target="_blank" rel="noreferrer">↗ PR</a>` : ''}
+            style="background:${colour(r)}"></button>`).join('')}${
+        hidden > 0 || open
+          ? `<button type="button" class="more" data-task="${esc(task)}">${open ? 'свернуть' : '+' + hidden}</button>`
+          : ''
+      }</div>
+      ${prs.length ? prLink(prs[0].outcome.prUrl,
+          `↗ ${prs[0].outcome.prUrl.split('/').pop()}`,
+          `PR прогона ${prs[0].runTag}` + (prs.length > 1 ? `, всего PR по задаче: ${prs.length}` : '')) : ''}
     </div>`;
   }).join('');
 
   for (const bar of el('rail').querySelectorAll('button[data-tag]')) {
     bar.onclick = () => select(bar.dataset.tag);
+  }
+  for (const more of el('rail').querySelectorAll('button[data-task]')) {
+    more.onclick = () => {
+      const task = more.dataset.task;
+      expanded.has(task) ? expanded.delete(task) : expanded.add(task);
+      renderRail();
+    };
   }
 }
 
@@ -295,7 +357,7 @@ function renderSide() {
   if (result) {
     const url = result.prUrl;
     cards.push(`<div class="card"><h4>Исход · ${esc(result.kind ?? (url ? 'pr' : '—'))}</h4>
-      ${url ? `<p><a href="${esc(url)}" target="_blank" rel="noreferrer">↗ ${esc(url.split('/').pop())}</a></p>` : ''}
+      ${url ? `<p>${prLink(url, '↗ ' + url.split('/').pop(), `PR прогона ${run.runTag}`)}</p>` : ''}
       ${result.reason ? `<p style="color:var(--bad)">${esc(result.reason)}</p>` : ''}
       ${result.branch ? `<p style="color:var(--dim)">${esc(result.branch)}</p>` : ''}</div>`);
   }
@@ -370,6 +432,69 @@ async function loadRuns() {
   if (!selected && runs.length) select(runs[0].runTag);
 }
 
+/**
+ * Вопросы к человеку. Прогон припаркован под меткой задачи, ответ уезжает вторым
+ * A2A-запросом с `metadata.answer`. Ожидание с тредом отвечается в Mattermost —
+ * перехватывать его панелью незачем.
+ */
+async function renderAsked() {
+  const waiting = snapshot.waiting ?? [];
+  if (!waiting.length) { el('asked').innerHTML = ''; return; }
+
+  const blocks = await Promise.all(waiting.map(async (item) => {
+    let questions = [];
+    try {
+      const info = await (await fetch(`/api/run?tag=${encodeURIComponent(item.runTag)}`)).json();
+      questions = info.json?.['analysis.json']?.questions
+        ?? info.json?.['meta.json']?.ended?.questions
+        ?? [];
+    } catch {
+      questions = [];
+    }
+    const inThread = Boolean(item.thread);
+    return `<div class="asked">
+      <h3>Ждёт ответа · ${esc(item.taskRef)} · ${esc(item.runTag)}</h3>
+      ${questions.length
+        ? `<ol>${questions.map((q) => `<li>${esc(q)}</li>`).join('')}</ol>`
+        : '<p class="hint">текст вопросов не найден в артефактах прогона</p>'}
+      ${inThread
+        ? '<p class="hint">ответ идёт в тред Mattermost — панель в него не пишет</p>'
+        : `<textarea data-answer="${esc(item.taskRef)}" placeholder="Ответ — фактами, по пунктам"></textarea>
+           <div class="foot">
+             <button type="button" class="primary" data-send="${esc(item.taskRef)}">Ответить</button>
+             <span class="hint" data-note="${esc(item.taskRef)}"></span>
+           </div>`}
+    </div>`;
+  }));
+
+  el('asked').innerHTML = blocks.join('');
+  for (const button of el('asked').querySelectorAll('button[data-send]')) {
+    button.onclick = () => sendAnswer(button.dataset.send, button);
+  }
+}
+
+async function sendAnswer(taskRef, button) {
+  const box = el('asked').querySelector(`textarea[data-answer="${taskRef}"]`);
+  const note = el('asked').querySelector(`span[data-note="${taskRef}"]`);
+  const answer = box?.value.trim();
+  if (!answer) { note.textContent = 'ответ пустой'; return; }
+  button.disabled = true;
+  note.textContent = 'отправляю…';
+  try {
+    const reply = await (await fetch('/api/answer', {
+      method: 'POST',
+      headers: {'content-type': 'application/json'},
+      body: JSON.stringify({taskRef, answer}),
+    })).json();
+    note.textContent = reply.sent ? 'принято, прогон продолжается' : (reply.note ?? 'не принято');
+    if (reply.sent) box.value = '';
+  } catch (error) {
+    note.textContent = String(error);
+  } finally {
+    button.disabled = false;
+  }
+}
+
 async function loadState() {
   try {
     snapshot = await (await fetch('/api/state')).json();
@@ -378,6 +503,12 @@ async function loadState() {
   }
   renderState();
   renderStrip();
+  // Перерисовка стирала бы набранный ответ, поэтому только при смене состава.
+  const waitingNow = (snapshot.waiting ?? []).map((w) => w.runTag).sort().join(',');
+  if (waitingNow !== askedSignature) {
+    askedSignature = waitingNow;
+    renderAsked();
+  }
 }
 
 const stream = new EventSource('/api/events');

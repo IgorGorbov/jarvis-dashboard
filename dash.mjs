@@ -229,30 +229,42 @@ const readBody = async (req) => {
   }
 };
 
+/** Метка задачи без тикета: под ней Jarvis паркует прямые вызовы. */
+const NO_TASK = 'no-task';
+
+const sourceOf = (issueId) =>
+  issueId && issueId !== NO_TASK
+    ? {type: 'youtrack', issueId: String(issueId)}
+    : {type: 'direct'};
+
+/** Отказ приезжает быстро и текстом — его стоит показать, а не проглотить. */
+const refusalText = (payload) => {
+  const parts = payload?.result?.parts ?? payload?.result?.message?.parts ?? [];
+  const said = parts
+    .map((part) => part?.content?.value)
+    .filter((value) => typeof value === 'string')
+    .join('\n');
+  return said.includes('NO_ACTION') ? said : undefined;
+};
+
 /**
  * Ответа не ждём: `execute` в Jarvis синхронно дожидается всего прогона, то есть
- * ответ пришёл бы через два часа. Отправляем и переключаемся на журнал.
+ * успешный ответ пришёл бы через два часа. Ждём три секунды — за них успевает
+ * приехать только отказ («занят», «нет вопроса»), и его показываем.
  */
-const startTask = async (req, res) => {
-  const body = await readBody(req);
-  const text = String(body.text ?? '').trim();
-  const source =
-    body.issueId ? {type: 'youtrack', issueId: String(body.issueId)} : {type: 'direct'};
-  const message = {
-    messageId: crypto.randomUUID(),
-    role: 'ROLE_USER',
-    parts: [{content: {$case: 'text', value: text}}],
-    metadata: {
-      source,
-      understandingConfirmed: Boolean(body.confirmed),
-      ...(body.model ? {model: body.model} : {}),
-    },
-  };
+const callAgent = async (res, metadata, text) => {
   const envelope = {
     jsonrpc: '2.0',
     id: Date.now(),
     method: 'message/send',
-    params: {message},
+    params: {
+      message: {
+        messageId: crypto.randomUUID(),
+        role: 'ROLE_USER',
+        parts: [{content: {$case: 'text', value: text}}],
+        metadata,
+      },
+    },
   };
 
   const controller = new AbortController();
@@ -264,24 +276,56 @@ const startTask = async (req, res) => {
       body: JSON.stringify(envelope),
       signal: controller.signal,
     });
-    sendJson(res, {sent: true, status: upstream.status});
+    const payload = await upstream.json().catch(() => undefined);
+    const refused = refusalText(payload);
+    sendJson(res, refused ? {sent: false, note: refused} : {sent: true});
   } catch (error) {
-    // Обрыв по нашему же таймауту — норма: задача принята, прогон идёт.
-    const aborted = error?.name === 'AbortError';
-    sendJson(res, {
-      sent: aborted,
-      note: aborted ? 'ответ не ждём — смотрите журнал' : String(error),
-    });
+    // Обрыв по нашему таймауту — норма: запрос принят, работа идёт.
+    if (error?.name === 'AbortError') {
+      sendJson(res, {sent: true});
+    } else {
+      // Показываем адрес: чаще всего агент просто не запущен.
+      sendJson(res, {sent: false, note: `агент недоступен на ${AGENT}`});
+    }
   } finally {
     clearTimeout(timer);
   }
 };
+
+const startTask = (req, res) =>
+  readBody(req).then((body) =>
+    callAgent(
+      res,
+      {
+        source: sourceOf(body.issueId),
+        understandingConfirmed: Boolean(body.confirmed),
+        ...(body.model ? {model: body.model} : {}),
+      },
+      String(body.text ?? '').trim(),
+    ),
+  );
+
+/**
+ * Ответ на вопросы анализа. Прогон припаркован под меткой задачи, поэтому ключ —
+ * `taskRef`, а не `runTag`, и он же определяет источник.
+ */
+const answerTask = (req, res) =>
+  readBody(req).then((body) => {
+    const answer = String(body.answer ?? '').trim();
+    if (!answer) {
+      return sendJson(res, {sent: false, note: 'ответ пустой'}, 400);
+    }
+    return callAgent(res, {source: sourceOf(body.taskRef), answer}, '');
+  });
 
 const serve = async (req, res) => {
   const url = new URL(req.url, `http://localhost:${PORT}`);
 
   if (req.method === 'POST' && url.pathname === '/api/start') {
     return startTask(req, res);
+  }
+  if (req.method === 'POST' && url.pathname === '/api/answer') {
+    return answerTask(req, res);
   }
 
   switch (url.pathname) {
