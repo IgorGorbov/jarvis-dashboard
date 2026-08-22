@@ -13,6 +13,8 @@ const JOURNAL = path.join(ROOT, 'events.jsonl');
 const PORT = Number(process.env.PORT ?? 4100);
 const AGENT = process.env.JARVIS_A2A ?? 'http://localhost:4000';
 const POLL_MS = 500;
+/** Сколько журнала отдаём при подключении. Замер: прогон добавляет ~6 строк. */
+const TAIL_BYTES = 256 * 1024;
 
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 
@@ -146,6 +148,8 @@ const streamEvents = (req, res) => {
   });
 
   let offset = 0;
+  let primed = false;
+  let dropFirstLine = false;
   let alive = true;
   req.on('close', () => {
     alive = false;
@@ -156,8 +160,21 @@ const streamEvents = (req, res) => {
       try {
         const info = await stat(JOURNAL).catch(() => undefined);
         if (info) {
+          if (!primed) {
+            primed = true;
+            // Журнал общий на все прогоны и не подрезается. При подключении
+            // отдаём только хвост: полный след давнего прогона всё равно лежит
+            // в его папке, в `events.json`.
+            if (info.size > TAIL_BYTES) {
+              offset = info.size - TAIL_BYTES;
+              dropFirstLine = true;
+            }
+          }
           // Файл усох — журнал подрезали или переписали, читаем заново с начала.
-          if (info.size < offset) offset = 0;
+          if (info.size < offset) {
+            offset = 0;
+            dropFirstLine = false;
+          }
           if (info.size > offset) {
             const handle = await open(JOURNAL, 'r');
             const buf = Buffer.alloc(info.size - offset);
@@ -168,7 +185,14 @@ const streamEvents = (req, res) => {
             const nl = buf.lastIndexOf(0x0a);
             if (nl >= 0) {
               offset += nl + 1;
-              for (const line of buf.subarray(0, nl).toString('utf8').split('\n')) {
+              let chunk = buf.subarray(0, nl);
+              if (dropFirstLine) {
+                dropFirstLine = false;
+                // Начали с середины файла, значит первая строка обрезана слева.
+                const first = chunk.indexOf(0x0a);
+                chunk = first >= 0 ? chunk.subarray(first + 1) : Buffer.alloc(0);
+              }
+              for (const line of chunk.toString('utf8').split('\n')) {
                 if (line.trim()) res.write(`data: ${line}\n\n`);
               }
             }
