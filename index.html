@@ -216,7 +216,7 @@
     <div id="budget"></div>
     <div id="asked"></div>
     <div class="tabs">
-      <button type="button" class="tab on" data-view="feed">Лента</button>
+      <button type="button" class="tab on" data-view="feed">События</button>
       <button type="button" class="tab" data-view="diff" id="tab-diff">Диф</button>
     </div>
     <div class="feed" id="feed"></div>
@@ -297,7 +297,7 @@ document.addEventListener('click', (click) => {
 });
 const tone = (id) => (STOP.has(id) ? 'stop' : HOLD.has(id) ? 'hold' : 'ok');
 
-/* ---------- лента ---------- */
+/* ---------- события ---------- */
 
 function renderFeed() {
   const rows = mine();
