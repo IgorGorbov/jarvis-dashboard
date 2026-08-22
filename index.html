@@ -105,6 +105,9 @@
   .step.done { color:var(--ok); border-color:#24503a; }
   .step.now { color:#cfdcfb; border-color:#35538c; background:#1a2740; }
   .step.stop { color:var(--bad); border-color:#5c2a29; }
+  /* Шаг петли уже работал, но в петле это не «пройдено» — только «был». */
+  .step.ran { color:var(--dim); }
+  .step.hold { color:var(--warn); border-color:#5c4a1a; }
   .arrow { color:var(--faint); font-size:11px; }
   .loop {
     display:inline-flex; align-items:center; gap:.35rem; border:1px solid #35538c;
@@ -210,7 +213,14 @@
 <script>
 const STEPS = ['analyze', 'prepare', 'implement', 'check', 'review', 'pr'];
 const LOOP = 'jarvis-implement-check-review';
-const STOP = new Set(['A2','A4','P1','I2','I4','C1','C3','R1','R3','PR1','PR2','M3','M4','M5']);
+// PR3 — работа осталась на ветке, PR не создан: это не успех.
+const STOP = new Set(['A2','A4','P1','I2','I4','C1','C3','R1','R3','PR1','PR2','PR3','M3','M4','M5']);
+// Куда прогон идёт после решения — из самого решения, а не из догадок по истории.
+const NEXT = {proceed: 'prepare', checks: 'check', review: 'review', retry: 'implement', publish: 'pr'};
+// Эти шаги выполняются один раз, поэтому «зелёный» для них правда. Шаги петли
+// завершаются на каждой попытке, и зелёный по факту завершения означал бы, что
+// после трёх кругов пройдено всё.
+const ONCE = new Set(['analyze', 'prepare']);
 const HOLD = new Set(['A3','A5','C4','R4','M2']);
 
 const events = [];
@@ -287,20 +297,49 @@ const row = (at, who, what, cls) =>
 function renderStrip() {
   if (!selected) { el('strip').innerHTML = ''; return; }
   const rows = mine();
-  const finished = new Set(rows.filter((e) => e.ms !== undefined && e.stage !== LOOP).map((e) => e.stage));
+  const ran = new Set(rows.filter((e) => e.ms !== undefined && e.stage !== LOOP).map((e) => e.stage));
   const stopped = rows.find((e) => e.decision && STOP.has(e.decision) && e.stage);
+  const published = rows.some((e) => e.decision === 'PR4');
   const attempts = rows.filter((e) => typeof e.attempt === 'number').map((e) => e.attempt);
   const attempt = attempts.length ? Math.max(...attempts) : 0;
 
-  // Событий начала шага агент не пишет: идущим считаем первый незавершённый.
-  const running = snapshot.active?.runTag === selected
-    ? STEPS.find((s) => !finished.has(s))
+  // Событий начала шага агент не пишет, зато решение говорит, куда идём дальше.
+  const lastGo = [...rows].reverse().find((e) => e.go && NEXT[e.go]);
+  const running = snapshot.active?.runTag === selected && !stopped
+    ? NEXT[lastGo?.go] ?? (ran.has('analyze') ? undefined : 'analyze')
     : undefined;
 
+  // Где прогон встал, если он уже не идёт и до PR не дошёл: последнее событие и
+  // есть точка остановки. Без этого полоса показывала «analyze ✓» и пустоту.
+  const lastEvent = rows[rows.length - 1];
+  const halted =
+    !running && !published && lastEvent?.stage ? lastEvent.stage : undefined;
+  const haltTone = stopped ? 'stop' : 'hold';
+
+  const times = (stage) => rows.filter((e) => e.ms !== undefined && e.stage === stage).length;
+
   const chip = (s) => {
-    const cls = stopped?.stage === s ? 'stop' : s === running ? 'now' : finished.has(s) ? 'done' : '';
-    const mark = cls === 'done' ? ' ✓' : cls === 'now' ? ' ◉' : cls === 'stop' ? ' ✕' : '';
-    return `<span class="step ${cls}">${s}${mark}</span>`;
+    const done = s === 'pr' ? published : ONCE.has(s) && ran.has(s);
+    const cls = stopped?.stage === s ? 'stop'
+      : s === running ? 'now'
+      : s === halted ? haltTone
+      : done ? 'done'
+      : ran.has(s) ? 'ran' : '';
+    const mark = cls === 'done' ? ' ✓'
+      : cls === 'now' ? ' ◉'
+      : cls === 'stop' ? ' ✕'
+      : cls === 'hold' ? ' ⏸'
+      : '';
+    // Счётчик вместо легенды: серый с «×3» читается сам — шаг петли прогонялся
+    // трижды и, скорее всего, прогонится снова.
+    const count = !ONCE.has(s) && s !== 'pr' && times(s) > 1 ? ` ×${times(s)}` : '';
+    const why = cls === 'done' ? 'пройден'
+      : cls === 'now' ? 'идёт сейчас'
+      : cls === 'stop' ? 'здесь прогон остановлен'
+      : cls === 'hold' ? 'здесь прогон ждёт человека'
+      : cls === 'ran' ? `выполнений: ${times(s)}; в петле это не «пройден»`
+      : 'не выполнялся';
+    return `<span class="step ${cls}" title="${esc(why)}">${s}${mark}${count}</span>`;
   };
 
   const head = [chip('analyze'), '<span class="arrow">→</span>', chip('prepare'), '<span class="arrow">→</span>'];
