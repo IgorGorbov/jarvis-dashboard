@@ -63,7 +63,30 @@
   .runs button.sel { border-color:var(--text); }
   .runs button:focus-visible { outline:2px solid var(--accent); outline-offset:1px; }
   .pr { font-size:11px; cursor:copy; }
-  .prs { display:flex; flex-wrap:wrap; gap:.3rem .5rem; }
+  .filter {
+    width:calc(100% - 1.6rem); margin:0 .8rem .4rem; font:inherit; font-size:11px;
+    background:var(--bg); color:var(--text); border:1px solid var(--line);
+    border-radius:4px; padding:.2rem .35rem;
+  }
+  .task-head .name {
+    background:transparent; border:none; padding:0; color:var(--text);
+    font:inherit; cursor:pointer; text-align:left;
+  }
+  .task-head .name:hover { color:var(--accent); }
+  .rows { display:flex; flex-direction:column; gap:1px; margin:.2rem 0 .1rem; }
+  .run { display:flex; align-items:center; gap:.3rem; }
+  .run.sel { background:#1a2436; }
+  .run .pick {
+    flex:1; min-width:0; display:flex; align-items:center; gap:.35rem;
+    background:transparent; border:none; padding:.1rem 0; font:inherit;
+    font-size:10px; cursor:pointer; text-align:left;
+  }
+  .run .mono { color:var(--text); white-space:nowrap; }
+  .run .dim { color:var(--faint); }
+  .run .when { white-space:nowrap; }
+  .run .kind { overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+  .run .dot { flex:none; }
+  .run .pr { flex:none; }
   .prs .pr:not(:first-child) { color:var(--warn); }
   .runs .more {
     height:8px; padding:0 3px; font-size:9px; line-height:8px; color:var(--faint);
@@ -155,7 +178,11 @@
 </div>
 
 <div class="body">
-  <div class="rail" id="rail"></div>
+  <div class="rail" id="rail">
+    <div class="label">Прогоны · <span id="rail-count">—</span></div>
+    <input id="filter" class="filter" placeholder="фильтр по задаче">
+    <div id="tasks"></div>
+  </div>
   <div class="main">
     <div class="strip" id="strip"></div>
     <div id="asked"></div>
@@ -193,7 +220,9 @@ let selected = null;
 let detail = null;
 let railSignature = '';
 let askedSignature = '';
-// Полосок на задачу: у FM-6347 их уже 15, и без предела ряд превращается в стену.
+let filter = '';
+// Пределы на задачу. Замер на 460 прогонах: без предела на PR у задачи с 60
+// попытками выходило 15 чипов, а по всему списку — 136 чипов и четыре экрана.
 const BARS = 10;
 const expanded = new Set();
 
@@ -307,51 +336,72 @@ function renderRail() {
     }
     return 'var(--faint)';
   };
+  // Формат вручную: локальный `toLocaleString` вставляет запятую, и строка с
+  // ссылкой на PR перестаёт влезать в 210 px, ломая дату на две линии.
+  const when = (run) => {
+    const at = run.startedAt ?? run.lastAt;
+    if (!at) return '—';
+    const d = new Date(at);
+    const two = (n) => String(n).padStart(2, '0');
+    return `${two(d.getDate())}.${two(d.getMonth() + 1)} ${two(d.getHours())}:${two(d.getMinutes())}`;
+  };
 
-  // Перерисовка рвёт фокус на кнопке прогона, поэтому только при настоящем
-  // изменении списка, а не на каждом опросе.
   const signature = runs.map((r) => `${r.runTag}:${r.outcome?.kind ?? ''}`).join('|')
-    + `#${selected}#${[...expanded].sort().join(',')}`;
+    + `#${selected}#${[...expanded].sort().join(',')}#${filter}`;
   if (signature === railSignature) return;
   railSignature = signature;
 
-  el('rail').innerHTML = '<div class="label">Прогоны</div>' + [...byTask].map(([task, list]) => {
-    // Показываем все PR задачи, а не только свежий: каждый принадлежит своему
-    // прогону, и если их несколько — значит лишние попытки остались открытыми.
-    // Это находка, а не шум, прятать её незачем.
-    const prs = list.filter((r) => r.outcome?.prUrl);
+  const needle = filter.trim().toLowerCase();
+  const groups = [...byTask].filter(([task]) => !needle || task.toLowerCase().includes(needle));
+  el('rail-count').textContent = needle ? `${groups.length} из ${byTask.size}` : String(groups.length);
+
+  el('tasks').innerHTML = groups.map(([task, list]) => {
     const open = expanded.has(task);
     const shown = open ? list : list.slice(0, BARS);
     const hidden = list.length - shown.length;
-    return `<div class="task">
-      <div class="task-head"><span>${esc(task)}</span><span>${list.length}</span></div>
-      <div class="runs">${shown.map((r) =>
-        `<button type="button"
-            title="${esc(r.runTag)} · ${esc(r.outcome?.kind ?? 'без исхода')}"
-            aria-label="прогон ${esc(r.runTag)}, исход ${esc(r.outcome?.kind ?? 'неизвестен')}"
-            data-tag="${esc(r.runTag)}"
-            class="${r.runTag === selected ? 'sel' : ''}"
-            style="background:${colour(r)}"></button>`).join('')}${
-        hidden > 0 || open
-          ? `<button type="button" class="more" data-task="${esc(task)}">${open ? 'свернуть' : '+' + hidden}</button>`
-          : ''
-      }</div>
-      ${prs.length
-        ? `<div class="prs">${prs.map((r) => prLink(
-              r.outcome.prUrl,
-              '↗ ' + r.outcome.prUrl.split('/').pop(),
-              `PR прогона ${r.runTag}`,
-            )).join('')}</div>`
+
+    // Свёрнутая задача — только полоски: цвет уже говорит, какие попытки дали PR.
+    // Развёрнутая — по строке на прогон, и ссылка стоит в строке своего прогона,
+    // а не отдельным рядом чипов: иначе непонятно, какой PR к какому запуску.
+    const bars = `<div class="runs">${shown.map((r) =>
+      `<button type="button"
+          title="${esc(r.runTag)} · ${esc(r.outcome?.kind ?? 'без исхода')}"
+          aria-label="прогон ${esc(r.runTag)}, исход ${esc(r.outcome?.kind ?? 'неизвестен')}"
+          data-tag="${esc(r.runTag)}"
+          class="${r.runTag === selected ? 'sel' : ''}"
+          style="background:${colour(r)}"></button>`).join('')}${
+      list.length > BARS
+        ? `<button type="button" class="more" data-task="${esc(task)}">${open ? 'свернуть' : '+' + hidden}</button>`
+        : ''
+    }</div>`;
+
+    const rows = list.map((r) => `<div class="run ${r.runTag === selected ? 'sel' : ''}">
+      <button type="button" class="pick" data-tag="${esc(r.runTag)}">
+        <i class="dot" style="background:${colour(r)}"></i>
+        <span class="mono">${esc(r.runTag)}</span>
+        <span class="dim when">${esc(when(r))}</span>
+        ${r.outcome?.prUrl ? '' : `<span class="dim kind">${esc(r.outcome?.kind ?? '—')}</span>`}
+      </button>
+      ${r.outcome?.prUrl
+        ? prLink(r.outcome.prUrl, '↗ ' + r.outcome.prUrl.split('/').pop(), `PR прогона ${r.runTag}`)
         : ''}
+    </div>`).join('');
+
+    return `<div class="task">
+      <div class="task-head">
+        <button type="button" class="name" data-task="${esc(task)}">${open ? '▾' : '▸'} ${esc(task)}</button>
+        <span>${list.length}</span>
+      </div>
+      ${open ? `<div class="rows">${rows}</div>` : bars}
     </div>`;
   }).join('');
 
-  for (const bar of el('rail').querySelectorAll('button[data-tag]')) {
+  for (const bar of el('tasks').querySelectorAll('button[data-tag]')) {
     bar.onclick = () => select(bar.dataset.tag);
   }
-  for (const more of el('rail').querySelectorAll('button[data-task]')) {
-    more.onclick = () => {
-      const task = more.dataset.task;
+  for (const toggle of el('tasks').querySelectorAll('button[data-task]')) {
+    toggle.onclick = () => {
+      const task = toggle.dataset.task;
       expanded.has(task) ? expanded.delete(task) : expanded.add(task);
       renderRail();
     };
@@ -556,6 +606,8 @@ function setupToggle(id, panel, key) {
     apply(off);
   };
 }
+el('filter').oninput = () => { filter = el('filter').value; renderRail(); };
+
 setupToggle('toggle-rail', 'rail', 'panel.rail');
 setupToggle('toggle-side', 'side', 'panel.side');
 
