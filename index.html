@@ -247,15 +247,26 @@ const STEPS = ['analyze', 'prepare', 'implement', 'check', 'review', 'pr'];
 // имени, иначе в ленте он рисуется полным идентификатором в три строки.
 const LOOP_ID = 'jarvis-implement-check-review';
 const isLoop = (e) => e.loop === true || e.stage === LOOP_ID;
-// PR3 — работа осталась на ветке, PR не создан: это не успех.
-const STOP = new Set(['A2','A4','P1','I2','I4','C1','C3','R1','R3','PR1','PR2','PR3','M3','M4','M5']);
+// Полный набор из `DecisionId`/`IncomingId` агента. Раскладка по трём корзинам,
+// и незнакомый идентификатор попадает в «непонятно», а не в «хорошо»: дважды
+// новое решение (PR3, потом I5) молча красилось зелёным.
+const STOP = new Set([
+  'A2', 'A4', 'P1',
+  'I2', 'I4', 'I5',
+  'C1', 'C3',
+  'R1', 'R3',
+  'PR1', 'PR2', 'PR3',
+  'M3', 'M4', 'M5',
+]);
+const GOOD = new Set(['A6', 'I1', 'I3', 'C2', 'R2', 'PR4', 'M1', 'M6']);
 // Куда прогон идёт после решения — из самого решения, а не из догадок по истории.
 const NEXT = {proceed: 'prepare', checks: 'check', review: 'review', retry: 'implement', publish: 'pr'};
 // Эти шаги выполняются один раз, поэтому «зелёный» для них правда. Шаги петли
 // завершаются на каждой попытке, и зелёный по факту завершения означал бы, что
 // после трёх кругов пройдено всё.
 const ONCE = new Set(['analyze', 'prepare']);
-const HOLD = new Set(['A3','A5','C4','R4','M2']);
+// M7 — отмену запросил человек: не поломка и не успех.
+const HOLD = new Set(['A3', 'A5', 'C4', 'R4', 'M2', 'M7']);
 
 const events = [];
 let runs = [];
@@ -295,7 +306,8 @@ document.addEventListener('click', (click) => {
     () => window.open(link.href, '_blank', 'noreferrer'),
   );
 });
-const tone = (id) => (STOP.has(id) ? 'stop' : HOLD.has(id) ? 'hold' : 'ok');
+const tone = (id) =>
+  STOP.has(id) ? 'stop' : HOLD.has(id) ? 'hold' : GOOD.has(id) ? 'ok' : 'ms';
 
 /* ---------- события ---------- */
 
@@ -351,14 +363,18 @@ function renderStrip() {
   const lastEvent = rows[rows.length - 1];
   const halted =
     !running && !published && lastEvent?.stage ? lastEvent.stage : undefined;
-  const haltTone = stopped ? 'stop' : 'hold';
+  // Отмену агент помечает исходом, поэтому шаг, на котором прогон погас, — это
+  // пауза по воле человека, а не место поломки.
+  const cancelled =
+    runs.find((r) => r.runTag === selected)?.outcome?.kind === 'cancelled';
+  const haltTone = cancelled || !stopped ? 'hold' : 'stop';
 
   const times = (stage) =>
     rows.filter((e) => e.ms !== undefined && !isLoop(e) && e.stage === stage).length;
 
   const chip = (s) => {
     const done = s === 'pr' ? published : ONCE.has(s) && ran.has(s);
-    const cls = stopped?.stage === s ? 'stop'
+    const cls = stopped?.stage === s ? (cancelled ? 'hold' : 'stop')
       : s === running ? 'now'
       : s === halted ? haltTone
       : done ? 'done'
@@ -374,7 +390,7 @@ function renderStrip() {
     const why = cls === 'done' ? 'пройден'
       : cls === 'now' ? 'идёт сейчас'
       : cls === 'stop' ? 'здесь прогон остановлен'
-      : cls === 'hold' ? 'здесь прогон ждёт человека'
+      : cls === 'hold' ? (cancelled ? 'здесь прогон отменён человеком' : 'здесь прогон ждёт человека')
       : cls === 'ran' ? `выполнений: ${times(s)}; в петле это не «пройден»`
       : 'не выполнялся';
     return `<span class="step ${cls}" title="${esc(why)}">${s}${mark}${count}</span>`;
@@ -430,7 +446,11 @@ function renderRail() {
     const kind = run.outcome?.kind;
     if (kind === 'pr') return 'var(--ok)';
     if (kind === 'kept' || kind === 'stopped' || kind === 'failed') return 'var(--bad)';
-    if (kind === 'asked' || kind === 'suspended' || kind === 'no-changes' || kind === 'skipped') {
+    // `cancelled` — остановил человек. Ничего не сломалось, красить красным нельзя.
+    if (
+      kind === 'cancelled' || kind === 'asked' || kind === 'suspended' ||
+      kind === 'no-changes' || kind === 'skipped'
+    ) {
       return 'var(--warn)';
     }
     return 'var(--faint)';
