@@ -115,6 +115,13 @@
   }
   .quiet { margin-left:auto; color:var(--faint); font-size:11px; }
   .quiet.stale { color:var(--warn); }
+  .bar-row {
+    display:flex; align-items:center; gap:.6rem;
+    padding:.4rem .9rem; border-bottom:1px solid var(--line);
+  }
+  .bar-note { font-size:11px; color:var(--faint); white-space:nowrap; }
+  .bar { flex:1; height:4px; background:#1e2732; border-radius:2px; overflow:hidden; }
+  .bar i { display:block; height:100%; }
 
   .asked {
     border-bottom:1px solid var(--line); background:#1a1710;
@@ -177,7 +184,7 @@
   <button type="button" class="toggle" id="toggle-rail" aria-pressed="true">Прогоны</button>
   <button type="button" class="toggle" id="toggle-side" aria-pressed="true">Артефакты</button>
   <button class="primary" id="start-open">Запустить задачу</button>
-  <button disabled title="cancelTask в агенте пока пустой">Остановить</button>
+  <button type="button" id="stop" disabled>Остановить</button>
 </div>
 
 <div class="body">
@@ -188,6 +195,7 @@
   </div>
   <div class="main">
     <div class="strip" id="strip"></div>
+    <div id="budget"></div>
     <div id="asked"></div>
     <div class="feed" id="feed"></div>
   </div>
@@ -212,7 +220,6 @@
 
 <script>
 const STEPS = ['analyze', 'prepare', 'implement', 'check', 'review', 'pr'];
-const LOOP = 'jarvis-implement-check-review';
 // PR3 — работа осталась на ветке, PR не создан: это не успех.
 const STOP = new Set(['A2','A4','P1','I2','I4','C1','C3','R1','R3','PR1','PR2','PR3','M3','M4','M5']);
 // Куда прогон идёт после решения — из самого решения, а не из догадок по истории.
@@ -280,8 +287,8 @@ function renderFeed() {
       return row(e.at, e.stage, `${e.decision} · ${e.go}${tail}`, tone(e.decision));
     }
     if (e.ms !== undefined) {
-      const what = e.stage === LOOP ? `петля целиком — ${secs(e.ms)}` : `завершён за ${secs(e.ms)}`;
-      return row(e.at, e.stage, what, 'ms');
+      const what = e.loop ? `целиком — ${secs(e.ms)}` : `завершён за ${secs(e.ms)}`;
+      return row(e.at, e.loop ? 'попытка' : e.stage, what, 'ms');
     }
     return row(e.at, e.stage ?? '—', JSON.stringify(e), 'ms');
   }).join('');
@@ -297,7 +304,7 @@ const row = (at, who, what, cls) =>
 function renderStrip() {
   if (!selected) { el('strip').innerHTML = ''; return; }
   const rows = mine();
-  const ran = new Set(rows.filter((e) => e.ms !== undefined && e.stage !== LOOP).map((e) => e.stage));
+  const ran = new Set(rows.filter((e) => e.ms !== undefined && !e.loop).map((e) => e.stage));
   const stopped = rows.find((e) => e.decision && STOP.has(e.decision) && e.stage);
   const published = rows.some((e) => e.decision === 'PR4');
   const attempts = rows.filter((e) => typeof e.attempt === 'number').map((e) => e.attempt);
@@ -316,7 +323,8 @@ function renderStrip() {
     !running && !published && lastEvent?.stage ? lastEvent.stage : undefined;
   const haltTone = stopped ? 'stop' : 'hold';
 
-  const times = (stage) => rows.filter((e) => e.ms !== undefined && e.stage === stage).length;
+  const times = (stage) =>
+    rows.filter((e) => e.ms !== undefined && !e.loop && e.stage === stage).length;
 
   const chip = (s) => {
     const done = s === 'pr' ? published : ONCE.has(s) && ran.has(s);
@@ -355,6 +363,28 @@ function renderStrip() {
     : '';
 
   el('strip').innerHTML = [...head, loop, ...tail].join('') + quiet;
+  renderBudget();
+}
+
+/**
+ * Срок прогона. Считается агентом в момент взятия машины, поэтому «сколько идёт»
+ * и «сколько осталось» — это его цифры, а не наши догадки по первому событию.
+ */
+function renderBudget() {
+  const active = snapshot.active;
+  if (!active || active.runTag !== selected || !active.since || !active.deadlineAt) {
+    el('budget').innerHTML = '';
+    return;
+  }
+  const started = new Date(active.since).getTime();
+  const total = active.deadlineAt - started;
+  const spent = Math.min(Date.now() - started, total);
+  const share = total > 0 ? Math.round((spent / total) * 100) : 0;
+  const left = Math.max(active.deadlineAt - Date.now(), 0);
+  el('budget').innerHTML = `<div class="bar-row">
+    <span class="bar-note">идёт ${secs(spent)} · до срока ${secs(left)}</span>
+    <span class="bar"><i style="width:${share}%;background:${share > 80 ? 'var(--warn)' : 'var(--ok)'}"></i></span>
+  </div>`;
 }
 
 /* ---------- список прогонов ---------- */
@@ -513,6 +543,11 @@ function renderState() {
       (waiting ? ` · ждут ответа: ${waiting}` : '')
     : `<i class="dot"></i> свободен` + (waiting ? ` · ждут ответа: ${waiting}` : '');
   el('start-open').disabled = Boolean(active);
+  const stop = el('stop');
+  stop.disabled = !active;
+  stop.title = active
+    ? `отменить ${active.taskRef} — работа уйдёт в stash`
+    : 'нечего отменять';
 }
 
 /* ---------- загрузка ---------- */
@@ -565,10 +600,14 @@ async function renderAsked() {
         ? `<ol>${questions.map((q) => `<li>${esc(q)}</li>`).join('')}</ol>`
         : '<p class="hint">текст вопросов не найден в артефактах прогона</p>'}
       ${inThread
-        ? '<p class="hint">ответ идёт в тред Mattermost — панель в него не пишет</p>'
+        ? `<div class="foot">
+             <span class="hint">ответ идёт в тред Mattermost — панель в него не пишет</span>
+             <button type="button" data-drop="${esc(item.taskRef)}">Снять с ожидания</button>
+           </div>`
         : `<textarea data-answer="${esc(item.taskRef)}" placeholder="Ответ — фактами, по пунктам"></textarea>
            <div class="foot">
              <button type="button" class="primary" data-send="${esc(item.taskRef)}">Ответить</button>
+             <button type="button" data-drop="${esc(item.taskRef)}">Снять с ожидания</button>
              <span class="hint" data-note="${esc(item.taskRef)}"></span>
            </div>`}
     </div>`;
@@ -577,6 +616,25 @@ async function renderAsked() {
   el('asked').innerHTML = blocks.join('');
   for (const button of el('asked').querySelectorAll('button[data-send]')) {
     button.onclick = () => sendAnswer(button.dataset.send, button);
+  }
+  for (const button of el('asked').querySelectorAll('button[data-drop]')) {
+    button.onclick = () => cancel(button.dataset.drop, `Снять ${button.dataset.drop} с ожидания?`);
+  }
+}
+
+/** Работа не теряется: агент кладёт её в stash и говорит об этом в ответе. */
+async function cancel(taskRef, question) {
+  if (!confirm(question)) return;
+  try {
+    const reply = await (await fetch('/api/cancel', {
+      method: 'POST',
+      headers: {'content-type': 'application/json'},
+      body: JSON.stringify({taskRef}),
+    })).json();
+    if (reply.note) alert(reply.note);
+    loadState();
+  } catch (error) {
+    alert(String(error));
   }
 }
 
@@ -646,6 +704,12 @@ function setupToggle(id, panel, key) {
   };
 }
 el('filter').oninput = () => { filter = el('filter').value; renderRail(); };
+
+el('stop').onclick = () => {
+  const active = snapshot.active;
+  if (!active) return;
+  cancel(active.taskRef, `Отменить ${active.taskRef}? Работа уйдёт в stash.`);
+};
 
 setupToggle('toggle-rail', 'rail', 'panel.rail');
 setupToggle('toggle-side', 'side', 'panel.side');

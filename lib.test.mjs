@@ -1,6 +1,6 @@
 import {test} from 'node:test';
 import assert from 'node:assert/strict';
-import {normalizeOutcome, refusalText, splitRunDir} from './lib.mjs';
+import {agentText, normalizeOutcome, splitRunDir} from './lib.mjs';
 
 test('splitRunDir делит по первому дефису, а не по последнему', () => {
   assert.deepEqual(splitRunDir('aa940ed9-FM-6324'), {
@@ -68,16 +68,18 @@ test('исход: нечего разбирать', () => {
   assert.equal(normalizeOutcome({}, {}), undefined);
 });
 
-test('отказ агента виден, а успех не притворяется отказом', () => {
-  const refusal = {
-    result: {parts: [{content: {value: 'NO_ACTION: по FM-1 нет вопроса'}}]},
-  };
-  assert.equal(refusalText(refusal), 'NO_ACTION: по FM-1 нет вопроса');
-  // Вторая форма конверта — сообщение внутри result.
+test('текст агента достаётся из обеих форм конверта', () => {
   assert.equal(
-    refusalText({result: {message: {parts: [{content: {value: 'NO_ACTION: занят'}}]}}}),
-    'NO_ACTION: занят',
+    agentText({result: {parts: [{content: {value: 'NO_ACTION: по FM-1 нет вопроса'}}]}}),
+    'NO_ACTION: по FM-1 нет вопроса',
   );
-  assert.equal(refusalText({result: {parts: [{content: {value: 'PR открыт'}}]}}), undefined);
-  assert.equal(refusalText(undefined), undefined);
+  // Вторая форма — сообщение внутри result.
+  assert.equal(
+    agentText({result: {message: {parts: [{content: {value: 'Отменяю FM-2'}}]}}}),
+    'Отменяю FM-2',
+  );
+  // Успех тоже возвращается: отмена сообщает по делу, а не только отказывает.
+  assert.equal(agentText({result: {parts: [{content: {value: 'PR открыт'}}]}}), 'PR открыт');
+  assert.equal(agentText(undefined), undefined);
+  assert.equal(agentText({result: {parts: []}}), undefined);
 });

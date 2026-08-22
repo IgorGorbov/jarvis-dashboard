@@ -3,7 +3,7 @@ import {createServer} from 'node:http';
 import {readFile, readdir, stat, open} from 'node:fs/promises';
 import path from 'node:path';
 import {fileURLToPath} from 'node:url';
-import {normalizeOutcome, refusalText, splitRunDir} from './lib.mjs';
+import {agentText, normalizeOutcome, splitRunDir} from './lib.mjs';
 
 const HERE = path.dirname(fileURLToPath(import.meta.url));
 const ROOT = path.resolve(
@@ -231,8 +231,10 @@ const callAgent = async (res, metadata, text) => {
       signal: controller.signal,
     });
     const payload = await upstream.json().catch(() => undefined);
-    const refused = refusalText(payload);
-    sendJson(res, refused ? {sent: false, note: refused} : {sent: true});
+    // Отмена отвечает быстро и по делу («работа сохранится в stash»), поэтому
+    // показываем текст агента и при успехе, а не только отказ.
+    const said = agentText(payload);
+    sendJson(res, {sent: !said?.includes('NO_ACTION'), note: said});
   } catch (error) {
     // Обрыв по нашему таймауту — норма: запрос принят, работа идёт.
     if (error?.name === 'AbortError') {
@@ -263,6 +265,12 @@ const startTask = (req, res) =>
  * Ответ на вопросы анализа. Прогон припаркован под меткой задачи, поэтому ключ —
  * `taskRef`, а не `runTag`, и он же определяет источник.
  */
+/** Отмена: активный прогон гасится, ждущий снимается с ожидания. */
+const cancelTask = (req, res) =>
+  readBody(req).then((body) =>
+    callAgent(res, {source: sourceOf(body.taskRef), cancel: true}, ''),
+  );
+
 const answerTask = (req, res) =>
   readBody(req).then((body) => {
     const answer = String(body.answer ?? '').trim();
@@ -280,6 +288,9 @@ const serve = async (req, res) => {
   }
   if (req.method === 'POST' && url.pathname === '/api/answer') {
     return answerTask(req, res);
+  }
+  if (req.method === 'POST' && url.pathname === '/api/cancel') {
+    return cancelTask(req, res);
   }
 
   switch (url.pathname) {

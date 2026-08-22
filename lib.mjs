@@ -42,12 +42,15 @@ export const normalizeOutcome = (result, meta) => {
   return undefined;
 };
 
-/** Отказ приезжает быстро и текстом — его стоит показать, а не проглотить. */
-export const refusalText = (payload) => {
+/**
+ * Что сказал агент: конверт A2A встречается в двух формах. Отдаём текст как есть,
+ * а отказ ли это — решает вызывающий по префиксу `NO_ACTION`.
+ */
+export const agentText = (payload) => {
   const parts = payload?.result?.parts ?? payload?.result?.message?.parts ?? [];
   const said = parts
     .map((part) => part?.content?.value)
     .filter((value) => typeof value === 'string')
     .join('\n');
-  return said.includes('NO_ACTION') ? said : undefined;
+  return said || undefined;
 };
