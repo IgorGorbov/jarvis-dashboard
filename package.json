@@ -8,6 +8,7 @@
   },
   "scripts": {
     "start": "node dash.mjs",
-    "dev": "node --watch dash.mjs"
+    "dev": "node --watch dash.mjs",
+    "test": "node --test && node check-page.mjs"
   }
 }
