@@ -1,0 +1,13 @@
+{
+  "name": "jarvis-dashboard",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Панель наблюдения за прогонами агента Jarvis",
+  "engines": {
+    "node": ">=24"
+  },
+  "scripts": {
+    "start": "node dash.mjs",
+    "dev": "node --watch dash.mjs"
+  }
+}

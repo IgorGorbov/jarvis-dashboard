@@ -6,16 +6,17 @@
 ## Запуск
 
 ```
-node dash.mjs
+yarn start
 ```
 
-Открыть http://localhost:4100
+Открыть http://localhost:4100. При правке самой панели — `yarn dev`: перезапуск
+по изменению файла средствами Node, без зависимостей.
 
 Путь до артефактов по умолчанию — `../agents/artifacts/jarvis` относительно этого
 файла. Другой путь — первым аргументом:
 
 ```
-node dash.mjs /путь/до/artifacts/jarvis
+yarn start /путь/до/artifacts/jarvis
 ```
 
 Переменные: `PORT` (по умолчанию 4100), `JARVIS_A2A` (по умолчанию
