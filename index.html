@@ -57,6 +57,8 @@
   .runs button.sel { border-color:var(--text); }
   .runs button:focus-visible { outline:2px solid var(--accent); outline-offset:1px; }
   .pr { font-size:11px; cursor:copy; }
+  .prs { display:flex; flex-wrap:wrap; gap:.3rem .5rem; }
+  .prs .pr:not(:first-child) { color:var(--warn); }
   .runs .more {
     height:8px; padding:0 3px; font-size:9px; line-height:8px; color:var(--faint);
     background:transparent; border-color:var(--line);
@@ -109,6 +111,9 @@
   .what { white-space:pre-wrap; overflow-wrap:anywhere; }
   .empty { color:var(--faint); padding:1rem .9rem; }
 
+  /* Пути и имена файлов — единый токен без пробелов: без принудительного
+     переноса карточка растягивается и панель уезжает в горизонтальный скролл. */
+  .card, .asked { overflow-wrap:anywhere; }
   .card { border:1px solid var(--line); border-radius:6px; padding:.5rem .6rem; margin-bottom:.55rem; }
   .card h4 { margin:0 0 .3rem; font-size:11px; font-weight:500; color:var(--dim); }
   .card p { margin:.15rem 0; font-size:11px; }
@@ -303,8 +308,9 @@ function renderRail() {
   railSignature = signature;
 
   el('rail').innerHTML = '<div class="label">Прогоны</div>' + [...byTask].map(([task, list]) => {
-    // Ссылка одна на задачу, но принадлежит конкретному прогону — самому свежему
-    // с PR. Поэтому подписываем номером и называем прогон в подсказке.
+    // Показываем все PR задачи, а не только свежий: каждый принадлежит своему
+    // прогону, и если их несколько — значит лишние попытки остались открытыми.
+    // Это находка, а не шум, прятать её незачем.
     const prs = list.filter((r) => r.outcome?.prUrl);
     const open = expanded.has(task);
     const shown = open ? list : list.slice(0, BARS);
@@ -322,9 +328,13 @@ function renderRail() {
           ? `<button type="button" class="more" data-task="${esc(task)}">${open ? 'свернуть' : '+' + hidden}</button>`
           : ''
       }</div>
-      ${prs.length ? prLink(prs[0].outcome.prUrl,
-          `↗ ${prs[0].outcome.prUrl.split('/').pop()}`,
-          `PR прогона ${prs[0].runTag}` + (prs.length > 1 ? `, всего PR по задаче: ${prs.length}` : '')) : ''}
+      ${prs.length
+        ? `<div class="prs">${prs.map((r) => prLink(
+              r.outcome.prUrl,
+              '↗ ' + r.outcome.prUrl.split('/').pop(),
+              `PR прогона ${r.runTag}`,
+            )).join('')}</div>`
+        : ''}
     </div>`;
   }).join('');
 
