@@ -241,7 +241,10 @@ const callAgent = async (res, metadata, text) => {
       message: {
         messageId: crypto.randomUUID(),
         role: 'ROLE_USER',
-        parts: [{content: {$case: 'text', value: text}}],
+        // Проводная форма части — `text`. `content.$case` это внутренний вид SDK:
+        // сервер такой конверт принимал, но текст терял, и агент получал пустую
+        // задачу — проверено, `issue.txt` выходил нулевой длины.
+        parts: [{text}],
         metadata,
       },
     },
