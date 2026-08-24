@@ -89,7 +89,12 @@ const listRuns = async () => {
     });
   }
 
-  // Отказ на приёме папки не создаёт — такой прогон виден только по журналу.
+  // Ответ и запрос отмены приезжают отдельными A2A-запросами, поэтому получают
+  // свою метку прогона. Прогоном они не являются: относятся к уже идущему.
+  // Из журнала заводим запись только для начала работы и для отказов на приёме —
+  // у тех папки нет, и журнал единственный след.
+  const OWN_RUN = new Set(['M3', 'M4', 'M5', 'M6']);
+
   for (const row of await readJournal()) {
     const tag = row.runTag;
     if (!tag) continue;
@@ -99,6 +104,7 @@ const listRuns = async () => {
       known.lastAt = row.at;
       continue;
     }
+    if (row.replyKey && !OWN_RUN.has(row.decision)) continue;
     byTag.set(tag, {
       runTag: tag,
       taskRef: row.taskRef ?? row.replyKey ?? 'без задачи',
