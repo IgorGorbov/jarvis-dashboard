@@ -229,7 +229,16 @@
   <form method="dialog" id="start-form">
     <label>Ключ задачи в YouTrack<input name="issueId" placeholder="FM-6347"></label>
     <label>Или текст задачи (без YouTrack)<textarea name="text" placeholder="Что сделать"></textarea></label>
-    <label>Модель<input name="model" placeholder="пусто — по умолчанию"></label>
+    <label>Модель
+      <span style="display:flex;gap:1rem;margin-top:.25rem">
+        <label style="display:flex;gap:.3rem;align-items:center;margin:0;color:var(--text)">
+          <input type="radio" name="model" value="sonnet" checked style="width:auto;margin:0"> sonnet
+        </label>
+        <label style="display:flex;gap:.3rem;align-items:center;margin:0;color:var(--text)">
+          <input type="radio" name="model" value="opus" style="width:auto;margin:0"> opus
+        </label>
+      </span>
+    </label>
     <label style="display:flex;gap:.4rem;align-items:flex-start">
       <input type="checkbox" name="confirmed" style="width:auto;margin:.2rem 0 0">
       <span>Продолжить с сохранённым разбором
@@ -271,6 +280,17 @@ const NEXT = {proceed: 'prepare', checks: 'check', review: 'review', retry: 'imp
 const ONCE = new Set(['analyze', 'prepare']);
 // M7 — отмену запросил человек: не поломка и не успех.
 const HOLD = new Set(['A3', 'A5', 'C4', 'R4', 'M2', 'M7']);
+
+// Виды исхода по корзинам. Наборами, а не цепочкой сравнений, чтобы сверка с
+// источником могла их вычитать: `awaiting-confirmation` появился новым и молча
+// попал в «исход неизвестен» — та же ошибка, что трижды случалась с решениями.
+const KIND_OK = new Set(['pr']);
+const KIND_BAD = new Set(['kept', 'stopped', 'failed']);
+const KIND_WAIT = new Set([
+  'awaiting-confirmation', 'cancelled', 'asked', 'suspended', 'no-changes', 'skipped',
+  // Старые прогоны: исход записан прозой, разбирать её не берёмся.
+  'проза',
+]);
 
 const events = [];
 let runs = [];
@@ -352,6 +372,9 @@ function renderFeed() {
     if (e.decision) {
       const tail = e.reason ? `\n${e.reason}` : '';
       return row(e.at, e.stage, `${e.decision} · ${e.go}${tail}`, tone(e.decision));
+    }
+    if (e.continues) {
+      return row(e.at, 'продолжение', `взят разбор прогона ${e.continues}`, 'hold');
     }
     if (e.ms !== undefined) {
       const loop = isLoop(e);
@@ -475,19 +498,12 @@ function renderRail() {
     byTask.get(key).push(run);
   }
   const colour = (run) => {
-    const kind = run.outcome?.kind;
-    // Прогон, вставший на вопросе или на пересказе, ждёт человека, а не сломался.
-    // Исход у него `stopped`, поэтому решаем по последнему решению.
+    // Прогон, вставший на вопросе, ждёт человека, а не сломался.
     if (HOLD.has(run.lastDecision)) return 'var(--warn)';
-    if (kind === 'pr') return 'var(--ok)';
-    if (kind === 'kept' || kind === 'stopped' || kind === 'failed') return 'var(--bad)';
-    // `cancelled` — остановил человек. Ничего не сломалось, красить красным нельзя.
-    if (
-      kind === 'cancelled' || kind === 'asked' || kind === 'suspended' ||
-      kind === 'no-changes' || kind === 'skipped'
-    ) {
-      return 'var(--warn)';
-    }
+    const kind = run.outcome?.kind;
+    if (KIND_OK.has(kind)) return 'var(--ok)';
+    if (KIND_BAD.has(kind)) return 'var(--bad)';
+    if (KIND_WAIT.has(kind)) return 'var(--warn)';
     return 'var(--faint)';
   };
   // Формат вручную: локальный `toLocaleString` вставляет запятую, и строка с
@@ -499,6 +515,22 @@ function renderRail() {
     const two = (n) => String(n).padStart(2, '0');
     return `${two(d.getDate())}.${two(d.getMonth() + 1)} ${two(d.getHours())}:${two(d.getMinutes())}`;
   };
+
+  // Исход `stopped` не объясняет, почему прогон встал: под ним и «проверки
+  // красные», и «жду подтверждения». Раз последнее решение известно — говорим им.
+  // Исход теперь сам называет ожидание — он авторитетнее последнего решения.
+  const KIND_WHY = {'awaiting-confirmation': 'ждал подтверждения'};
+  const WHY = {
+    A3: 'спрашивал',
+    A5: 'ждал подтверждения',
+    A1: 'разбор не найден',
+    I5: 'нужны права человека',
+    C1: 'проверка не отработала',
+    C3: 'проверки красные',
+    R3: 'ревью не согласилось',
+  };
+  const ended = (run) =>
+    KIND_WHY[run.outcome?.kind] ?? WHY[run.lastDecision] ?? run.outcome?.kind ?? '—';
 
   const signature = runs.map((r) => `${r.runTag}:${r.outcome?.kind ?? ''}`).join('|')
     + `#${selected}#${[...expanded].sort().join(',')}#${filter}`;
@@ -530,11 +562,12 @@ function renderRail() {
     }</div>`;
 
     const rows = list.map((r) => `<div class="run ${r.runTag === selected ? 'sel' : ''}">
-      <button type="button" class="pick" data-tag="${esc(r.runTag)}">
+      <button type="button" class="pick" data-tag="${esc(r.runTag)}"
+        title="${r.continues ? 'продолжает прогон ' + esc(r.continues) : esc(r.runTag)}">
         <i class="dot" style="background:${colour(r)}"></i>
-        <span class="mono">${esc(r.runTag)}</span>
+        <span class="mono">${r.continues ? '↳ ' : ''}${esc(r.runTag)}</span>
         <span class="dim when">${esc(when(r))}</span>
-        ${r.outcome?.prUrl ? '' : `<span class="dim kind">${esc(r.outcome?.kind ?? '—')}</span>`}
+        ${r.outcome?.prUrl ? '' : `<span class="dim kind">${esc(ended(r))}</span>`}
       </button>
       ${r.outcome?.prUrl
         ? prLink(r.outcome.prUrl, '↗ ' + r.outcome.prUrl.split('/').pop(), `PR прогона ${r.runTag}`)
@@ -899,6 +932,13 @@ stream.onmessage = (message) => {
   try {
     const event = JSON.parse(message.data);
     events.push(event);
+    // Прогон, которого ещё нет в списке: ждать опроса раз в 15 секунд нельзя —
+    // человек только что запустил задачу и хочет сразу на неё смотреть.
+    if (event.runTag && !runs.some((r) => r.runTag === event.runTag)) {
+      loadRuns().then(() => {
+        if (event.decision === 'M6') select(event.runTag);
+      });
+    }
     if (!selected) select(event.runTag);
     if (event.runTag === selected) { renderFeed(); renderStrip(); }
   } catch {

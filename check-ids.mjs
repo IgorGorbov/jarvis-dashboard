@@ -42,16 +42,46 @@ const known = new Set([
   ...bucketOf(page, 'GOOD'),
 ]);
 
-if (declared.length === 0 || known.size === 0) {
+// Виды исхода: те же грабли, что с решениями. `runOutcomeSchema` — исходы
+// конвейера, `RunEnded` в jarvis.ts — то, чем кончился прогон целиком.
+const kindsOf = (source) => [...source.matchAll(/kind: z\.literal\('([\w-]+)'\)/g)].map((m) => m[1]);
+const endedKindsOf = (source) => [...source.matchAll(/\{kind: '([\w-]+)'/g)].map((m) => m[1]);
+const kindBucket = (name) =>
+  (page.match(new RegExp(`const ${name} = new Set\\(\\[[\\s\\S]*?\\]`)) ?? [''])[0]
+    .match(/'([^']+)'/g)?.map((q) => q.slice(1, -1)) ?? [];
+
+let jarvis = '';
+try {
+  jarvis = await readFile(new URL('../agents/src/agents/jarvis/internal/jarvis.ts', import.meta.url), 'utf8');
+} catch {
+  // Файл мог переехать при рефакторинге: тогда сверяем только схему исходов.
+}
+
+// `{kind: 'outcome', outcome: {...}}` — обёртка вокруг исхода конвейера, а не
+// вид исхода сама по себе: раскрашивать по ней нечего.
+const WRAPPERS = new Set(['outcome']);
+const kinds = [...new Set([...kindsOf(schemas), ...endedKindsOf(jarvis)])].filter(
+  (kind) => !WRAPPERS.has(kind),
+);
+const knownKinds = new Set([
+  ...kindBucket('KIND_OK'),
+  ...kindBucket('KIND_BAD'),
+  ...kindBucket('KIND_WAIT'),
+]);
+
+if (declared.length === 0 || known.size === 0 || knownKinds.size === 0) {
   process.stdout.write('идентификаторы: не смог вычитать списки — проверьте разметку\n');
   process.exit(1);
 }
 
 const missing = declared.filter((id) => !known.has(id));
 const stale = [...known].filter((id) => !declared.includes(id));
+const missingKinds = kinds.filter((kind) => !knownKinds.has(kind));
 
-if (missing.length === 0 && stale.length === 0) {
-  process.stdout.write(`идентификаторы: все ${declared.length} разложены по корзинам\n`);
+if (missing.length === 0 && stale.length === 0 && missingKinds.length === 0) {
+  process.stdout.write(
+    `идентификаторы: все ${declared.length} разложены, виды исхода (${kinds.length}) тоже\n`,
+  );
   process.exit(0);
 }
 
@@ -60,5 +90,8 @@ if (missing.length) {
 }
 if (stale.length) {
   process.stdout.write(`в панели лишние: ${stale.join(', ')}\n`);
+}
+if (missingKinds.length) {
+  process.stdout.write(`панель не знает исходов: ${missingKinds.join(', ')}\n`);
 }
 process.exit(1);

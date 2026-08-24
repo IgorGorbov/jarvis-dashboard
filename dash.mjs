@@ -108,6 +108,8 @@ const listRuns = async () => {
       // Исход `stopped` слишком крупный — под ним и «проверки красные», и
       // «подтверди понимание», а это разные вещи для того, кто смотрит.
       if (row.stage && row.decision) known.lastDecision = row.decision;
+      // Продолжение подтверждённого разбора: агент называет прогон-родителя.
+      if (row.continues) known.continues = row.continues;
       continue;
     }
     if (row.replyKey && !OWN_RUN.has(row.decision)) continue;
