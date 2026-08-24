@@ -102,6 +102,10 @@ const listRuns = async () => {
     if (known) {
       if (!known.taskRef && row.taskRef) known.taskRef = row.taskRef;
       known.lastAt = row.at;
+      // Последнее решение самого прогона: по нему видно, ждёт ли он человека.
+      // Исход `stopped` слишком крупный — под ним и «проверки красные», и
+      // «подтверди понимание», а это разные вещи для того, кто смотрит.
+      if (row.stage && row.decision) known.lastDecision = row.decision;
       continue;
     }
     if (row.replyKey && !OWN_RUN.has(row.decision)) continue;

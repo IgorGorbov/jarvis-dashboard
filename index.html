@@ -476,6 +476,9 @@ function renderRail() {
   }
   const colour = (run) => {
     const kind = run.outcome?.kind;
+    // Прогон, вставший на вопросе или на пересказе, ждёт человека, а не сломался.
+    // Исход у него `stopped`, поэтому решаем по последнему решению.
+    if (HOLD.has(run.lastDecision)) return 'var(--warn)';
     if (kind === 'pr') return 'var(--ok)';
     if (kind === 'kept' || kind === 'stopped' || kind === 'failed') return 'var(--bad)';
     // `cancelled` — остановил человек. Ничего не сломалось, красить красным нельзя.
@@ -581,9 +584,11 @@ function renderSide() {
       ${result.branch ? `<p style="color:var(--dim)">${esc(result.branch)}</p>` : ''}</div>`);
   }
 
-  // Старый прогон: структурированного исхода нет, только проза из meta.
+  // `result.json` пишет только шаг `pr`. Прогон, вставший раньше, исход имеет —
+  // он в `meta`, — но файла результата у него нет, и «прозой» это называть нельзя.
   if (!result && run.outcome?.reason) {
-    cards.push(`<div class="card"><h4>Исход · записан прозой</h4>
+    const legacy = run.outcome.kind === 'проза';
+    cards.push(`<div class="card"><h4>Исход · ${esc(legacy ? 'записан прозой' : run.outcome.kind)}</h4>
       <p style="color:var(--dim)">${esc(run.outcome.reason)}</p></div>`);
   }
 
@@ -720,9 +725,26 @@ async function loadRuns() {
  * A2A-запросом с `metadata.answer`. Ожидание с тредом отвечается в Mattermost —
  * перехватывать его панелью незачем.
  */
+/**
+ * Прогон, вставший на пересказе (`A5`), в `waiting` не попадает: он не
+ * припаркован, а сохранил разбор и закончился. Ответ ему — не текст, а повторный
+ * запуск с галочкой, поэтому и блок отдельный, с одной кнопкой.
+ */
+function awaitingConfirmation() {
+  const newest = new Map();
+  for (const run of runs) {
+    const seen = newest.get(run.taskRef);
+    if (!seen || (run.startedAt ?? '') > (seen.startedAt ?? '')) newest.set(run.taskRef, run);
+  }
+  return [...newest.values()].filter(
+    (run) => run.lastDecision === 'A5' && run.runTag !== snapshot.active?.runTag,
+  );
+}
+
 async function renderAsked() {
   const waiting = snapshot.waiting ?? [];
-  if (!waiting.length) { el('asked').innerHTML = ''; return; }
+  const confirm = awaitingConfirmation();
+  if (!waiting.length && !confirm.length) { el('asked').innerHTML = ''; return; }
 
   const blocks = await Promise.all(waiting.map(async (item) => {
     let questions = [];
@@ -754,7 +776,19 @@ async function renderAsked() {
     </div>`;
   }));
 
-  el('asked').innerHTML = blocks.join('');
+  const confirmBlocks = confirm.map((run) => `<div class="asked">
+    <h3>Ждёт подтверждения · ${esc(run.taskRef)} · ${esc(run.runTag)}</h3>
+    <p>Агент пересказал задачу и ждёт «да». Пересказ — в карточке исхода справа.</p>
+    <div class="foot">
+      <button type="button" class="primary" data-confirm="${esc(run.runTag)}">Подтвердить понимание</button>
+      <span class="hint" data-note="${esc(run.runTag)}"></span>
+    </div>
+  </div>`);
+
+  el('asked').innerHTML = [...blocks, ...confirmBlocks].join('');
+  for (const button of el('asked').querySelectorAll('button[data-confirm]')) {
+    button.onclick = () => confirmUnderstanding(button.dataset.confirm, button);
+  }
   for (const button of el('asked').querySelectorAll('button[data-send]')) {
     button.onclick = () => sendAnswer(button.dataset.send, button);
   }
@@ -776,6 +810,40 @@ async function cancel(taskRef, question) {
     loadState();
   } catch (error) {
     alert(String(error));
+  }
+}
+
+/**
+ * Повторный запуск с сохранённым разбором. Для тикета текст не нужен — агент
+ * перечитает его сам; для прямой задачи шлём ровно тот текст, что он видел:
+ * сохранённый разбор ищется по метке задачи и отпечатку постановки.
+ */
+async function confirmUnderstanding(runTag, button) {
+  const run = runs.find((r) => r.runTag === runTag);
+  const note = el('asked').querySelector(`span[data-note="${runTag}"]`);
+  if (!run) return;
+  button.disabled = true;
+  note.textContent = 'отправляю…';
+  try {
+    const direct = !/^[A-Z]+-\d+$/.test(run.taskRef);
+    const text = direct
+      ? await (await fetch(`/api/file?tag=${encodeURIComponent(runTag)}&name=issue.txt`)).text()
+      : '';
+    const reply = await (await fetch('/api/start', {
+      method: 'POST',
+      headers: {'content-type': 'application/json'},
+      body: JSON.stringify({
+        issueId: direct ? undefined : run.taskRef,
+        text,
+        confirmed: true,
+      }),
+    })).json();
+    note.textContent = reply.sent ? 'принято, прогон продолжается' : (reply.note ?? 'не принято');
+    loadState();
+  } catch (error) {
+    note.textContent = String(error);
+  } finally {
+    button.disabled = false;
   }
 }
 
@@ -810,7 +878,10 @@ async function loadState() {
   renderState();
   renderStrip();
   // Перерисовка стирала бы набранный ответ, поэтому только при смене состава.
-  const waitingNow = (snapshot.waiting ?? []).map((w) => w.runTag).sort().join(',');
+  const waitingNow = [
+    ...(snapshot.waiting ?? []).map((w) => w.runTag),
+    ...awaitingConfirmation().map((r) => r.runTag),
+  ].sort().join(',');
   if (waitingNow !== askedSignature) {
     askedSignature = waitingNow;
     renderAsked();
