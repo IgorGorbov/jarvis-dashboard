@@ -230,9 +230,13 @@
     <label>Ключ задачи в YouTrack<input name="issueId" placeholder="FM-6347"></label>
     <label>Или текст задачи (без YouTrack)<textarea name="text" placeholder="Что сделать"></textarea></label>
     <label>Модель<input name="model" placeholder="пусто — по умолчанию"></label>
-    <label style="display:flex;gap:.4rem;align-items:center">
-      <input type="checkbox" name="confirmed" style="width:auto;margin:0">
-      понимание уже подтверждено
+    <label style="display:flex;gap:.4rem;align-items:flex-start">
+      <input type="checkbox" name="confirmed" style="width:auto;margin:.2rem 0 0">
+      <span>Продолжить с сохранённым разбором
+        <span style="display:block;color:var(--faint)">Только для повторного запуска: первый
+        останавливается на пересказе «как я понял задачу». Без сохранённого разбора
+        прогон остановится впустую.</span>
+      </span>
     </label>
     <div class="dlg-foot">
       <button value="cancel">Отмена</button>
