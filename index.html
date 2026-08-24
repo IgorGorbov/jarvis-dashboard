@@ -932,14 +932,17 @@ stream.onmessage = (message) => {
   try {
     const event = JSON.parse(message.data);
     events.push(event);
-    // Прогон, которого ещё нет в списке: ждать опроса раз в 15 секунд нельзя —
-    // человек только что запустил задачу и хочет сразу на неё смотреть.
-    if (event.runTag && !runs.some((r) => r.runTag === event.runTag)) {
+    // При открытии страницы поток переигрывает журнал с начала. Такие события —
+    // история: по ним нельзя ни выбирать прогон (первым придёт самый старый, и
+    // выбор потом дёрнется на свежий), ни дёргать список — он ещё пуст, и каждое
+    // событие выглядит незнакомым. Живое от переигранного отличаем по возрасту.
+    const live = Date.now() - new Date(event.at).getTime() < 30000;
+    if (live && event.runTag && !runs.some((r) => r.runTag === event.runTag)) {
       loadRuns().then(() => {
+        // Запуск: человек только что нажал и хочет смотреть именно на этот прогон.
         if (event.decision === 'M6') select(event.runTag);
       });
     }
-    if (!selected) select(event.runTag);
     if (event.runTag === selected) { renderFeed(); renderStrip(); }
   } catch {
     // Строка не разобралась — журнал мог дописываться в момент чтения.
