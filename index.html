@@ -736,8 +736,11 @@ function awaitingConfirmation() {
     const seen = newest.get(run.taskRef);
     if (!seen || (run.startedAt ?? '') > (seen.startedAt ?? '')) newest.set(run.taskRef, run);
   }
+  // Подтверждение создаёт новый прогон со своей меткой, поэтому сравнивать надо
+  // задачу, а не метку: иначе блок висит после успешного подтверждения и зовёт
+  // нажать второй раз — агент на это отвечает отказом по занятости.
   return [...newest.values()].filter(
-    (run) => run.lastDecision === 'A5' && run.runTag !== snapshot.active?.runTag,
+    (run) => run.lastDecision === 'A5' && run.taskRef !== snapshot.active?.taskRef,
   );
 }
 
@@ -780,7 +783,8 @@ async function renderAsked() {
     <h3>Ждёт подтверждения · ${esc(run.taskRef)} · ${esc(run.runTag)}</h3>
     <p>Агент пересказал задачу и ждёт «да». Пересказ — в карточке исхода справа.</p>
     <div class="foot">
-      <button type="button" class="primary" data-confirm="${esc(run.runTag)}">Подтвердить понимание</button>
+      <button type="button" class="primary" data-confirm="${esc(run.runTag)}"
+        ${snapshot.active ? 'disabled title="агент занят другой задачей"' : ''}>Подтвердить понимание</button>
       <span class="hint" data-note="${esc(run.runTag)}"></span>
     </div>
   </div>`);
@@ -839,7 +843,9 @@ async function confirmUnderstanding(runTag, button) {
       }),
     })).json();
     note.textContent = reply.sent ? 'принято, прогон продолжается' : (reply.note ?? 'не принято');
-    loadState();
+    // Список нужен сразу: по нему блок и понимает, что подтверждать уже нечего.
+    await loadState();
+    await loadRuns();
   } catch (error) {
     note.textContent = String(error);
   } finally {
