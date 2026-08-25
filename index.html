@@ -375,8 +375,12 @@ function renderFeed() {
       return row(e.at, 'входящее', `${e.decision}${e.reason ? ' · ' + e.reason : ''}`, tone(e.decision));
     }
     if (e.decision) {
+      const why = e.cause ? ` · ${e.cause}` : '';
       const tail = e.reason ? `\n${e.reason}` : '';
-      return row(e.at, e.stage, `${e.decision} · ${e.go}${tail}`, tone(e.decision));
+      return row(e.at, e.stage, `${e.decision} · ${e.go}${why}${tail}`, tone(e.decision));
+    }
+    if (e.start) {
+      return row(e.at, e.stage, 'старт', 'ms');
     }
     if (e.continues) {
       return row(e.at, 'продолжение', `взят разбор прогона ${e.continues}`, 'hold');
@@ -413,9 +417,16 @@ function renderStrip() {
   // `go: 'ask'` перехода не имеет — это «жди человека». Но после ответа прогон
   // возобновляется, и state.json уже показывает егоактивным: тогда идёт тот шаг, на
   // котором он стоял. Без этого панель рисовала паузу на работающем прогоне.
+  // Агент пишет старт шага, поэтому идущий шаг больше не выводим из решения:
+  // шаг, у которого стартов больше, чем завершений, и есть текущий.
+  const open = STEPS.filter((step) => {
+    const starts = rows.filter((e) => e.start && e.stage === step).length;
+    const ends = rows.filter((e) => e.ms !== undefined && !isLoop(e) && e.stage === step).length;
+    return starts > ends;
+  });
   const lastStage = [...rows].reverse().find((e) => e.stage)?.stage;
   const running = snapshot.active?.runTag === selected && !stopped
-    ? NEXT[lastGo?.go] ?? lastStage ?? 'analyze'
+    ? open[open.length - 1] ?? NEXT[lastGo?.go] ?? lastStage ?? 'analyze'
     : undefined;
 
   // Где прогон встал, если он уже не идёт и до PR не дошёл: последнее событие и
