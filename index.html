@@ -217,9 +217,11 @@
     <div id="asked"></div>
     <div class="tabs">
       <button type="button" class="tab on" data-view="feed">События</button>
+      <button type="button" class="tab" data-view="trace" id="tab-trace">Трасса</button>
       <button type="button" class="tab" data-view="diff" id="tab-diff">Диф</button>
     </div>
     <div class="feed" id="feed"></div>
+    <div class="feed" id="trace" hidden></div>
     <pre class="diff" id="diff" hidden></pre>
   </div>
   <div class="side" id="side"></div>
@@ -301,6 +303,13 @@ let railSignature = '';
 let askedSignature = '';
 let filter = '';
 let turnsNow;
+let lastCall;
+
+/** Путь в строке шага — хвостом: полный не влезает и вытесняет остальное. */
+const shortTarget = (target) => {
+  const parts = String(target).split('/');
+  return parts.length > 2 ? '…/' + parts.slice(-2).join('/') : target;
+};
 // Пределы на задачу. Замер на 460 прогонах: без предела на PR у задачи с 60
 // попытками выходило 15 чипов, а по всему списку — 136 чипов и четыре экрана.
 const BARS = 10;
@@ -486,9 +495,14 @@ function renderStrip() {
 
   const last = rows[rows.length - 1];
   const gap = last ? Date.now() - new Date(last.at).getTime() : 0;
-  const quiet = running
-    ? `<span class="quiet ${gap > 120000 ? 'stale' : ''}">тишина ${gap >= 60000 ? secs(gap) : Math.round(gap / 1000) + ' с'}</span>`
-    : '';
+  // Пока шаг идёт, «тишина» — не самый полезный ответ: в трассе видно, чем он
+  // занят прямо сейчас. Молчание показываем, только если и трасса молчит.
+  const doing = running && lastCall && Date.now() - new Date(lastCall.at).getTime() < 120000
+    ? `<span class="quiet">${esc(lastCall.tool)}${lastCall.target ? ' · ' + esc(shortTarget(lastCall.target)) : ''}</span>`
+    : running
+      ? `<span class="quiet ${gap > 120000 ? 'stale' : ''}">тишина ${gap >= 60000 ? secs(gap) : Math.round(gap / 1000) + ' с'}</span>`
+      : '';
+  const quiet = doing;
 
   el('strip').innerHTML = [...head, loop, ...tail].join('') + quiet;
   renderBudget(running);
@@ -732,6 +746,21 @@ function renderDiff(text) {
   el('diff').innerHTML = text.split('\n').map(line).join('');
 }
 
+/** Что агент читал и правил внутри шага — то, чего лента не показывает. */
+async function showTrace(tag) {
+  view('trace');
+  el('trace').innerHTML = '<div class="empty">читаю…</div>';
+  try {
+    const {tools} = await (await fetch(`/api/trace?tag=${encodeURIComponent(tag)}`)).json();
+    el('trace').innerHTML = tools.length
+      ? tools.map((t) => row(t.at, t.tool, `${t.target ?? ''}${t.ms ? ` · ${secs(t.ms)}` : ''}`, 'ms')).join('')
+      : '<div class="empty">трассы у этого прогона нет</div>';
+    el('trace').scrollTop = el('trace').scrollHeight;
+  } catch (error) {
+    el('trace').innerHTML = `<div class="empty">не прочиталась: ${esc(String(error))}</div>`;
+  }
+}
+
 async function showDiff(tag, name) {
   view('diff');
   el('diff').innerHTML = '<div>читаю…</div>';
@@ -745,6 +774,7 @@ async function showDiff(tag, name) {
 
 function view(which) {
   el('feed').hidden = which !== 'feed';
+  el('trace').hidden = which !== 'trace';
   el('diff').hidden = which !== 'diff';
   for (const tab of document.querySelectorAll('.tab')) {
     tab.classList.toggle('on', tab.dataset.view === which);
@@ -773,6 +803,8 @@ function renderState() {
 async function select(tag) {
   selected = tag;
   el('diff').innerHTML = '';
+  el('trace').innerHTML = '';
+  lastCall = undefined;
   view('feed');
   renderRail();
   renderStrip();
@@ -1009,6 +1041,7 @@ el('filter').oninput = () => { filter = el('filter').value; renderRail(); };
 
 for (const tab of document.querySelectorAll('.tab')) {
   tab.onclick = () => {
+    if (tab.dataset.view === 'trace') return showTrace(selected);
     if (tab.dataset.view === 'diff' && !el('diff').innerHTML) {
       const button = el('show-diff');
       if (button) return showDiff(selected, button.dataset.name);
@@ -1055,7 +1088,9 @@ setInterval(loadState, 2000);
 setInterval(async () => {
   if (!selected || snapshot.active?.runTag !== selected) { turnsNow = undefined; return; }
   try {
-    turnsNow = (await (await fetch(`/api/turns?tag=${encodeURIComponent(selected)}`)).json()).turns;
+    const seen = await (await fetch(`/api/turns?tag=${encodeURIComponent(selected)}`)).json();
+    turnsNow = seen.turns;
+    lastCall = seen.last;
     renderStrip();
   } catch {
     // Сервер мог перезапуститься: следующий круг поправит.

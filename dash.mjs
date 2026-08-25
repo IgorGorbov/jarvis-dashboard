@@ -149,7 +149,8 @@ const runDetail = async (tag) => {
   for (const name of names.filter((n) => RUN_ARTIFACTS.test(n))) {
     json[name] = await readJson(path.join(dir, name));
   }
-  return {run, files: names.sort(), json, ...(await traceTotals(dir))};
+  const {tools, ...totals} = await traceTotals(dir);
+  return {run, files: names.sort(), json, ...totals};
 };
 
 /**
@@ -165,18 +166,24 @@ const traceTotals = async (dir) => {
     return {};
   }
   let turns;
-  let calls = 0;
+  const tools = [];
   for (const line of raw.split('\n')) {
     if (!line.trim()) continue;
     try {
       const row = JSON.parse(line);
       if (typeof row.turn === 'number') turns = row.turn;
-      else if (row.tool) calls += 1;
+      else if (row.tool) tools.push(row);
     } catch {
       // Недописанная строка: трасса пишется по ходу прогона.
     }
   }
-  return {turns, calls};
+  return {turns, calls: tools.length, tools};
+};
+
+/** Папка прогона по метке: трасса нужна и счётчику, и вкладке. */
+const runDir = async (tag) => {
+  const detail = await runDetail(tag);
+  return detail?.run.dir ? path.join(ROOT, detail.run.dir) : undefined;
 };
 
 const SAFE_NAME = /^[\w.-]+$/;
@@ -382,9 +389,18 @@ const serve = async (req, res) => {
     case '/api/runs':
       return sendJson(res, await listRuns());
     // Лёгкая ручка для живого счётчика: карточки справа при опросе не трогаем.
+    // Заодно последний вызов — им строка шага отвечает на «что он делает сейчас».
     case '/api/turns': {
-      const detail = await runDetail(url.searchParams.get('tag') ?? '');
-      return sendJson(res, detail ? {turns: detail.turns, calls: detail.calls} : {});
+      const dir = await runDir(url.searchParams.get('tag') ?? '');
+      if (!dir) return sendJson(res, {});
+      const {tools = [], ...totals} = await traceTotals(dir);
+      return sendJson(res, {...totals, last: tools[tools.length - 1]});
+    }
+    case '/api/trace': {
+      const dir = await runDir(url.searchParams.get('tag') ?? '');
+      if (!dir) return sendJson(res, {tools: []});
+      const {tools = []} = await traceTotals(dir);
+      return sendJson(res, {tools});
     }
     case '/api/run': {
       const tag = url.searchParams.get('tag') ?? '';
