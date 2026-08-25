@@ -653,6 +653,13 @@ function renderRail() {
 
 /* ---------- артефакты выбранного прогона ---------- */
 
+/**
+ * `meta.json` пишется в конце прогона, поэтому у идущего модели там ещё нет.
+ * Пока он идёт, её знает снимок — там же, откуда берётся полоса срока.
+ */
+const active = (run) =>
+  snapshot.active?.runTag === run.runTag ? snapshot.active.model : undefined;
+
 function renderSide() {
   if (!detail) { el('side').innerHTML = '<div class="label">Артефакты</div>'; return; }
   const {run, json, files} = detail;
@@ -662,7 +669,7 @@ function renderSide() {
   const cards = [];
 
   cards.push(`<div class="card"><h4>${esc(run.runTag)} · ${esc(run.taskRef)}</h4>
-    <p>${esc(run.model ?? 'модель не записана')}</p>
+    <p>${esc(run.model ?? active(run) ?? 'модель не записана')}</p>
     ${run.resumed ? '<p style="color:var(--warn)">прогон продолжался после ответа</p>' : ''}</div>`);
 
   if (result) {
