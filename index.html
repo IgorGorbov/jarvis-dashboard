@@ -217,7 +217,8 @@
     <div id="asked"></div>
     <div class="tabs">
       <button type="button" class="tab on" data-view="feed">События</button>
-      <button type="button" class="tab" data-view="trace" id="tab-trace">Трасса</button>
+      <button type="button" class="tab" data-view="trace" id="tab-trace"
+        title="Каждый вызов инструмента внутри шага: что искал, что читал, что правил">Инструменты</button>
       <button type="button" class="tab" data-view="diff" id="tab-diff">Диф</button>
     </div>
     <div class="feed" id="feed"></div>
@@ -399,7 +400,7 @@ function renderFeed() {
       return row(e.at, e.stage, `${e.decision} · ${e.go}${why}${tail}`, tone(e.decision));
     }
     if (e.start) {
-      const cap = e.turnLimit ? ` · лимит ${e.turnLimit} ходов стадии` : '';
+      const cap = e.turnLimit ? ` · лимит ${e.turnLimit} ходов` : '';
       return row(e.at, e.stage, `старт${cap}`, 'ms');
     }
     if (e.continues) {
@@ -530,7 +531,7 @@ function renderBudget(runningStage) {
   const turnShare = cap && turnsNow ? Math.min(Math.round((turnsNow / cap) * 100), 100) : 0;
   const turnRow = cap
     ? `<div class="bar-row">
-        <span class="bar-note" title="Ход — обмен модели с инструментами внутри шага. Лимит свой у каждого шага.">ходы стадии ${turnsNow ?? '—'} из ${cap}</span>
+        <span class="bar-note" title="Ход — обмен модели с инструментами внутри шага. Лимит свой у каждого шага: анализ 80, реализация 120, ревью 40.">шаг ${runningStage}: ${turnsNow ?? '—'} из ${cap} ходов</span>
         <span class="bar"><i style="width:${turnShare}%;background:${
           turnShare > 80 ? 'var(--warn)' : 'var(--ok)'
         }"></i></span>
@@ -538,7 +539,7 @@ function renderBudget(runningStage) {
     : '';
 
   el('budget').innerHTML = `<div class="bar-row">
-    <span class="bar-note">идёт ${secs(spent)} · до срока ${secs(left)}</span>
+    <span class="bar-note" title="Срок прогона целиком — два часа с момента взятия машины.">прогон идёт ${secs(spent)} · до срока ${secs(left)}</span>
     <span class="bar"><i style="width:${share}%;background:${share > 80 ? 'var(--warn)' : 'var(--ok)'}"></i></span>
   </div>${turnRow}`;
 }
@@ -752,9 +753,15 @@ async function showTrace(tag) {
   el('trace').innerHTML = '<div class="empty">читаю…</div>';
   try {
     const {tools} = await (await fetch(`/api/trace?tag=${encodeURIComponent(tag)}`)).json();
+    // Медиана вызова — 26 мс, две трети короче 100 мс: в секундах это столбец
+    // «0.0 с». Время у строки стоит, только когда его стоит заметить, а общее
+    // ушло в шапку.
+    const spent = tools.reduce((sum, t) => sum + (t.ms ?? 0), 0);
+    const head = `<div class="empty">${tools.length} вызовов · ${spent >= 60000 ? secs(spent) : Math.round(spent / 1000) + ' с'} всего</div>`;
     el('trace').innerHTML = tools.length
-      ? tools.map((t) => row(t.at, t.tool, `${t.target ?? ''}${t.ms ? ` · ${secs(t.ms)}` : ''}`, 'ms')).join('')
-      : '<div class="empty">трассы у этого прогона нет</div>';
+      ? head + tools.map((t) => row(t.at, t.tool,
+          `${t.target ?? ''}${t.ms >= 1000 ? ` · ${secs(t.ms)}` : ''}`, 'ms')).join('')
+      : '<div class="empty">вызовов у этого прогона не записано</div>';
     el('trace').scrollTop = el('trace').scrollHeight;
   } catch (error) {
     el('trace').innerHTML = `<div class="empty">не прочиталась: ${esc(String(error))}</div>`;
@@ -1081,11 +1088,9 @@ el('start-form').onsubmit = async (submit) => {
   }
 };
 
-loadRuns();
-loadState();
 setInterval(loadState, 2000);
 // Счётчик ходов живой: трасса растёт по ходу шага.
-setInterval(async () => {
+const pollTurns = async () => {
   if (!selected || snapshot.active?.runTag !== selected) { turnsNow = undefined; return; }
   try {
     const seen = await (await fetch(`/api/turns?tag=${encodeURIComponent(selected)}`)).json();
@@ -1095,7 +1100,11 @@ setInterval(async () => {
   } catch {
     // Сервер мог перезапуститься: следующий круг поправит.
   }
-}, 3000);
+};
+// `setInterval` первый раз стреляет через интервал, поэтому после перезагрузки
+// панель три секунды писала «тишина N мин» на работающем прогоне и «— из 80».
+setInterval(pollTurns, 3000);
+Promise.all([loadRuns(), loadState()]).then(pollTurns);
 setInterval(loadRuns, 15000);
 setInterval(renderStrip, 1000);
 </script>
