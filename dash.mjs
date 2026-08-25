@@ -149,7 +149,34 @@ const runDetail = async (tag) => {
   for (const name of names.filter((n) => RUN_ARTIFACTS.test(n))) {
     json[name] = await readJson(path.join(dir, name));
   }
-  return {run, files: names.sort(), json};
+  return {run, files: names.sort(), json, ...(await traceTotals(dir))};
+};
+
+/**
+ * Трасса перемежает вызовы инструментов маркерами хода `{turn}`. Ходы растут по
+ * ходу шага, поэтому счётчик живой — в отличие от `events.jsonl`, куда число
+ * израсходованных ходов не попадает вовсе.
+ */
+const traceTotals = async (dir) => {
+  let raw;
+  try {
+    raw = await readFile(path.join(dir, 'trace.jsonl'), 'utf8');
+  } catch {
+    return {};
+  }
+  let turns;
+  let calls = 0;
+  for (const line of raw.split('\n')) {
+    if (!line.trim()) continue;
+    try {
+      const row = JSON.parse(line);
+      if (typeof row.turn === 'number') turns = row.turn;
+      else if (row.tool) calls += 1;
+    } catch {
+      // Недописанная строка: трасса пишется по ходу прогона.
+    }
+  }
+  return {turns, calls};
 };
 
 const SAFE_NAME = /^[\w.-]+$/;
@@ -354,6 +381,11 @@ const serve = async (req, res) => {
     }
     case '/api/runs':
       return sendJson(res, await listRuns());
+    // Лёгкая ручка для живого счётчика: карточки справа при опросе не трогаем.
+    case '/api/turns': {
+      const detail = await runDetail(url.searchParams.get('tag') ?? '');
+      return sendJson(res, detail ? {turns: detail.turns, calls: detail.calls} : {});
+    }
     case '/api/run': {
       const tag = url.searchParams.get('tag') ?? '';
       const detail = await runDetail(tag);

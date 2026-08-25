@@ -300,6 +300,7 @@ let detail = null;
 let railSignature = '';
 let askedSignature = '';
 let filter = '';
+let turnsNow;
 // Пределы на задачу. Замер на 460 прогонах: без предела на PR у задачи с 60
 // попытками выходило 15 чипов, а по всему списку — 136 чипов и четыре экрана.
 const BARS = 10;
@@ -490,14 +491,14 @@ function renderStrip() {
     : '';
 
   el('strip').innerHTML = [...head, loop, ...tail].join('') + quiet;
-  renderBudget();
+  renderBudget(running);
 }
 
 /**
  * Срок прогона. Считается агентом в момент взятия машины, поэтому «сколько идёт»
  * и «сколько осталось» — это его цифры, а не наши догадки по первому событию.
  */
-function renderBudget() {
+function renderBudget(runningStage) {
   const active = snapshot.active;
   if (!active || active.runTag !== selected || !active.since || !active.deadlineAt) {
     el('budget').innerHTML = '';
@@ -508,10 +509,24 @@ function renderBudget() {
   const spent = Math.min(Date.now() - started, total);
   const share = total > 0 ? Math.round((spent / total) * 100) : 0;
   const left = Math.max(active.deadlineAt - Date.now(), 0);
+
+  // Ходы — предел отдельного шага, и упереться в него можно, не потратив и
+  // десятой доли срока: наблюдался анализ, севший на 80 ходах за 87 минут.
+  const cap = limitOf(runningStage);
+  const turnShare = cap && turnsNow ? Math.min(Math.round((turnsNow / cap) * 100), 100) : 0;
+  const turnRow = cap
+    ? `<div class="bar-row">
+        <span class="bar-note">ходы ${turnsNow ?? '—'} из ${cap}</span>
+        <span class="bar"><i style="width:${turnShare}%;background:${
+          turnShare > 80 ? 'var(--warn)' : 'var(--ok)'
+        }"></i></span>
+      </div>`
+    : '';
+
   el('budget').innerHTML = `<div class="bar-row">
     <span class="bar-note">идёт ${secs(spent)} · до срока ${secs(left)}</span>
     <span class="bar"><i style="width:${share}%;background:${share > 80 ? 'var(--warn)' : 'var(--ok)'}"></i></span>
-  </div>`;
+  </div>${turnRow}`;
 }
 
 /* ---------- список прогонов ---------- */
@@ -1036,6 +1051,16 @@ el('start-form').onsubmit = async (submit) => {
 loadRuns();
 loadState();
 setInterval(loadState, 2000);
+// Счётчик ходов живой: трасса растёт по ходу шага.
+setInterval(async () => {
+  if (!selected || snapshot.active?.runTag !== selected) { turnsNow = undefined; return; }
+  try {
+    turnsNow = (await (await fetch(`/api/turns?tag=${encodeURIComponent(selected)}`)).json()).turns;
+    renderStrip();
+  } catch {
+    // Сервер мог перезапуститься: следующий круг поправит.
+  }
+}, 3000);
 setInterval(loadRuns, 15000);
 setInterval(renderStrip, 1000);
 </script>
