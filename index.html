@@ -399,7 +399,7 @@ function renderFeed() {
       return row(e.at, e.stage, `${e.decision} · ${e.go}${why}${tail}`, tone(e.decision));
     }
     if (e.start) {
-      const cap = e.turnLimit ? ` · лимит ${e.turnLimit} ходов` : '';
+      const cap = e.turnLimit ? ` · лимит ${e.turnLimit} ходов стадии` : '';
       return row(e.at, e.stage, `старт${cap}`, 'ms');
     }
     if (e.continues) {
@@ -530,7 +530,7 @@ function renderBudget(runningStage) {
   const turnShare = cap && turnsNow ? Math.min(Math.round((turnsNow / cap) * 100), 100) : 0;
   const turnRow = cap
     ? `<div class="bar-row">
-        <span class="bar-note">ходы ${turnsNow ?? '—'} из ${cap}</span>
+        <span class="bar-note" title="Ход — обмен модели с инструментами внутри шага. Лимит свой у каждого шага.">ходы стадии ${turnsNow ?? '—'} из ${cap}</span>
         <span class="bar"><i style="width:${turnShare}%;background:${
           turnShare > 80 ? 'var(--warn)' : 'var(--ok)'
         }"></i></span>
