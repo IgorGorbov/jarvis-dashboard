@@ -308,8 +308,16 @@ let lastCall;
 
 /** Путь в строке шага — хвостом: полный не влезает и вытесняет остальное. */
 const shortTarget = (target) => {
-  const parts = String(target).split('/');
-  return parts.length > 2 ? '…/' + parts.slice(-2).join('/') : target;
+  const text = String(target);
+  // У Grep «цель» — не файл, а образец поиска. Перечисление через `|` в строку
+  // не влезает и обрывается на полуслове: показываем первый вариант и счёт
+  // остальных, целиком образец виден на вкладке «Инструменты» и в подсказке.
+  if (text.includes('|')) {
+    const parts = text.split('|');
+    return `${parts[0]} +${parts.length - 1}`;
+  }
+  const parts = text.split('/');
+  return parts.length > 2 ? '…/' + parts.slice(-2).join('/') : text;
 };
 // Пределы на задачу. Замер на 460 прогонах: без предела на PR у задачи с 60
 // попытками выходило 15 чипов, а по всему списку — 136 чипов и четыре экрана.
@@ -499,7 +507,8 @@ function renderStrip() {
   // Пока шаг идёт, «тишина» — не самый полезный ответ: в трассе видно, чем он
   // занят прямо сейчас. Молчание показываем, только если и трасса молчит.
   const doing = running && lastCall && Date.now() - new Date(lastCall.at).getTime() < 120000
-    ? `<span class="quiet">${esc(lastCall.tool)}${lastCall.target ? ' · ' + esc(shortTarget(lastCall.target)) : ''}</span>`
+    ? `<span class="quiet" title="${esc(lastCall.tool + (lastCall.target ? ' · ' + lastCall.target : ''))}">${
+        esc(lastCall.tool)}${lastCall.target ? ' · ' + esc(shortTarget(lastCall.target)) : ''}</span>`
     : running
       ? `<span class="quiet ${gap > 120000 ? 'stale' : ''}">тишина ${gap >= 60000 ? secs(gap) : Math.round(gap / 1000) + ' с'}</span>`
       : '';
