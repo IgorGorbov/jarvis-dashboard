@@ -539,7 +539,7 @@ function renderBudget(runningStage) {
     : '';
 
   el('budget').innerHTML = `<div class="bar-row">
-    <span class="bar-note" title="Срок прогона целиком — два часа с момента взятия машины.">прогон идёт ${secs(spent)} · до срока ${secs(left)}</span>
+    <span class="bar-note" title="Срок прогона — два часа с момента взятия машины, дальше он обрывается. Осталось ${secs(left)}.">прогон: ${Math.round(spent / 60000)} из ${Math.round(total / 60000)} мин</span>
     <span class="bar"><i style="width:${share}%;background:${share > 80 ? 'var(--warn)' : 'var(--ok)'}"></i></span>
   </div>${turnRow}`;
 }
