@@ -315,6 +315,10 @@ const esc = (s) => String(s ?? '').replace(/[<>&]/g, (c) => ({'<':'&lt;','>':'&g
  * A2A-запросами и получают чужие метки, но относятся к идущему прогону — иначе
  * ответ не виден в ленте того, кому его дали.
  */
+/** Лимит ходов стадии агент называет в её старте — своего знания у панели нет. */
+const limitOf = (stage) =>
+  [...mine()].reverse().find((e) => e.start && e.stage === stage && e.turnLimit)?.turnLimit;
+
 const mine = () => {
   const own = events.filter((e) => e.runTag === selected);
   const run = runs.find((r) => r.runTag === selected);
@@ -375,12 +379,18 @@ function renderFeed() {
       return row(e.at, 'входящее', `${e.decision}${e.reason ? ' · ' + e.reason : ''}`, tone(e.decision));
     }
     if (e.decision) {
-      const why = e.cause ? ` · ${e.cause}` : '';
+      // Израсходованные ходы агент не пишет — их не доносит обёртка SDK. Но при
+      // упоре в лимит израсходовано ровно столько, сколько разрешено, и это
+      // единственный случай, когда число можно назвать не соврав.
+      const cap = e.cause === 'turn-limit' ? limitOf(e.stage) : undefined;
+      const spent = cap ? ` (${cap} из ${cap})` : '';
+      const why = e.cause ? ` · ${e.cause}${spent}` : '';
       const tail = e.reason ? `\n${e.reason}` : '';
       return row(e.at, e.stage, `${e.decision} · ${e.go}${why}${tail}`, tone(e.decision));
     }
     if (e.start) {
-      return row(e.at, e.stage, 'старт', 'ms');
+      const cap = e.turnLimit ? ` · лимит ${e.turnLimit} ходов` : '';
+      return row(e.at, e.stage, `старт${cap}`, 'ms');
     }
     if (e.continues) {
       return row(e.at, 'продолжение', `взят разбор прогона ${e.continues}`, 'hold');
