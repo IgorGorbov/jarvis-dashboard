@@ -74,10 +74,14 @@
   }
   .task-head .name:hover { color:var(--accent); }
   .rows { display:flex; flex-direction:column; gap:1px; margin:.2rem 0 .1rem; }
-  .run { display:flex; align-items:center; gap:.3rem; }
+  /* Переносим, а не подрезаем: в строке с PR сжиматься нечему — и метка, и дата
+     `nowrap`, а `.kind` с многоточием при ссылке не рисуется. Растянутый `.pick`
+     раньше вываливал дату за свою границу под ссылку. */
+  .run { display:flex; align-items:center; gap:.3rem; flex-wrap:wrap; }
   .run.sel { background:#1a2436; }
   .run .pick {
-    flex:1; min-width:0; display:flex; align-items:center; gap:.35rem;
+    flex:0 1 auto; min-width:0; overflow:hidden;
+    display:flex; align-items:center; gap:.35rem;
     background:transparent; border:none; padding:.1rem 0; font:inherit;
     font-size:10px; cursor:pointer; text-align:left;
   }
