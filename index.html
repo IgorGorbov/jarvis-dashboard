@@ -42,7 +42,9 @@
   .rail, .side { background:var(--panel); overflow-y:auto; }
   /* Колонки закреплены явно: без этого скрытая панель освобождает дорожку, и
      центр переезжает в `auto`-колонку, сжимаясь по содержимому вместо 1fr. */
-  .rail { grid-column:1; width:210px; border-right:1px solid var(--line); }
+  /* 210 px не хватало: строке с меткой, датой и ссылкой на PR нужно около 197 px
+     содержимого при 183 доступных. 240 даёт запас на «↳» продолжения. */
+  .rail { grid-column:1; width:240px; border-right:1px solid var(--line); }
   .main { grid-column:2; }
   .side { grid-column:3; width:300px; border-left:1px solid var(--line); padding:.6rem .7rem; }
   .rail.off, .side.off { display:none; }
