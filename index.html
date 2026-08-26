@@ -908,12 +908,24 @@ async function renderAsked() {
     </div>`;
   }));
 
+  // Пересказ лежит в исходе прогона. Раньше блок отсылал «в карточку справа», но
+  // справа стоит выбранный прогон, а выбран по умолчанию свежий — то есть чужой:
+  // человек читал про одну задачу, а имя видел другой.
+  const retold = (run) =>
+    (run.outcome?.reason ?? '')
+      .replace(/^требуется подтверждение понимания\.\s*/, '')
+      .replace(/\s*Если всё верно — перезапустите с metadata\.understandingConfirmed = true\.\s*$/, '');
+
   const confirmBlocks = confirm.map((run) => `<div class="asked">
     <h3>Ждёт подтверждения · ${esc(run.taskRef)} · ${esc(run.runTag)}</h3>
-    <p>Агент пересказал задачу и ждёт «да». Пересказ — в карточке исхода справа.</p>
+    ${retold(run)
+      ? `<p>${esc(retold(run))}</p>`
+      : '<p class="hint">пересказ не записан в исход прогона</p>'}
     <div class="foot">
       <button type="button" class="primary" data-confirm="${esc(run.runTag)}"
-        ${snapshot.active ? 'disabled title="агент занят другой задачей"' : ''}>Подтвердить понимание</button>
+        ${snapshot.active
+          ? `disabled title="агент занят задачей ${esc(snapshot.active.taskRef)} — подтвердить можно, когда она закончится"`
+          : ''}>Подтвердить понимание</button>
       <span class="hint" data-note="${esc(run.runTag)}"></span>
     </div>
   </div>`);
