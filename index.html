@@ -734,17 +734,15 @@ function renderSide() {
               title="открыть ${esc(name)}">${esc(text)}</a>`
         : `<span style="color:${colour}">${esc(text)}</span>`;
     };
-    cards.push(`<div class="card"><h4>Проверки · попытка ${esc(attempt)}</h4><p>${[
-      ...(c.ran ?? []).map(chip),
-      ...(c.skipped ?? []).map((s) => `<span style="color:var(--faint)">${esc(s)} — нет</span>`),
-    ].join(' · ')}</p>
+    cards.push(`<div class="card"><h4>Проверки · попытка ${esc(attempt)}</h4><p>${
+      (c.ran ?? []).map(chip).join(' · ')}</p>
     ${c.blocked ? `<p style="color:var(--warn)">не смогла отработать: ${esc(c.blocked)}</p>` : ''}</div>`);
   }
-  const patch = files.includes('diff.final.patch')
-    ? 'diff.final.patch'
-    : files.includes('diff.patch')
-      ? 'diff.patch'
-      : undefined;
+  // Диф оборванного прогона — первым: при обрыве ветка удаляется, и работа
+  // больше нигде не существует. Финальный диф лежит в PR или в оставшейся
+  // ветке, поэтому он тут удобство, а этот — единственная копия.
+  const patch = ['diff.aborted.patch', 'diff.final.patch', 'diff.patch']
+    .find((name) => files.includes(name));
   if (patch) {
     cards.push(`<div class="card"><h4>Диф · ${esc(patch)}</h4>
       <p><button type="button" id="show-diff" data-name="${esc(patch)}">Показать</button></p></div>`);
