@@ -271,24 +271,30 @@ const LOOP_ID = 'jarvis-implement-check-review';
 const isLoop = (e) => e.loop === true || e.stage === LOOP_ID;
 // Полный набор из `DecisionId`/`IncomingId` агента. Раскладка по трём корзинам,
 // и незнакомый идентификатор попадает в «непонятно», а не в «хорошо»: дважды
-// новое решение (PR3, потом I5) молча красилось зелёным.
+// новое решение молча красилось зелёным. Имена вместо кодов — с `1c63064`.
 const STOP = new Set([
-  'A1', 'A2', 'A4', 'P1',
-  'I2', 'I4', 'I5',
-  'C1', 'C3',
-  'R1', 'R3',
-  'PR1', 'PR2', 'PR3',
-  'M3', 'M4', 'M5',
+  'analysis-not-found', 'analyze-failed', 'questions-spent', 'install-failed',
+  'no-pr-meta', 'implement-aborted', 'agent-blocked',
+  'checks-broken', 'checks-red-spent',
+  'review-failed', 'changes-spent',
+  'run-stopped', 'no-changes', 'kept-on-branch',
+  'classify-failed', 'not-a-task', 'busy',
 ]);
-const GOOD = new Set(['A6', 'I1', 'I3', 'C2', 'R2', 'PR4', 'M1', 'M6']);
+const GOOD = new Set([
+  'plan-ready', 'code-written', 'pr-meta-reused', 'checks-green', 'approved',
+  'pr-opened', 'answer', 'accepted',
+]);
 // Куда прогон идёт после решения — из самого решения, а не из догадок по истории.
 const NEXT = {proceed: 'prepare', checks: 'check', review: 'review', retry: 'implement', publish: 'pr'};
 // Эти шаги выполняются один раз, поэтому «зелёный» для них правда. Шаги петли
 // завершаются на каждой попытке, и зелёный по факту завершения означал бы, что
 // после трёх кругов пройдено всё.
 const ONCE = new Set(['analyze', 'prepare']);
-// M7 — отмену запросил человек: не поломка и не успех.
-const HOLD = new Set(['A3', 'A5', 'C4', 'R4', 'M2', 'M7']);
+// `cancel-requested` — отмену запросил человек: не поломка и не успех.
+const HOLD = new Set([
+  'has-questions', 'needs-confirmation', 'checks-red-retry', 'changes-retry',
+  'held-thread-busy', 'cancel-requested',
+]);
 
 // Виды исхода по корзинам. Наборами, а не цепочкой сравнений, чтобы сверка с
 // источником могла их вычитать: `awaiting-confirmation` появился новым и молча
@@ -592,13 +598,13 @@ function renderRail() {
   // Исход теперь сам называет ожидание — он авторитетнее последнего решения.
   const KIND_WHY = {'awaiting-confirmation': 'ждал подтверждения'};
   const WHY = {
-    A3: 'спрашивал',
-    A5: 'ждал подтверждения',
-    A1: 'разбор не найден',
-    I5: 'нужны права человека',
-    C1: 'проверка не отработала',
-    C3: 'проверки красные',
-    R3: 'ревью не согласилось',
+    'has-questions': 'спрашивал',
+    'needs-confirmation': 'ждал подтверждения',
+    'analysis-not-found': 'разбор не найден',
+    'agent-blocked': 'нужны права человека',
+    'checks-broken': 'проверка не отработала',
+    'checks-red-spent': 'проверки красные',
+    'changes-spent': 'ревью не согласилось',
   };
   const ended = (run) =>
     KIND_WHY[run.outcome?.kind] ?? WHY[run.lastDecision] ?? run.outcome?.kind ?? '—';

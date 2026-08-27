@@ -15,14 +15,19 @@ const AGENT_SCHEMAS = new URL(
   import.meta.url,
 );
 
+// С `1c63064` идентификаторы — говорящие имена в кебаб-кейсе, а не коды вроде
+// `A5`. Прежнее выражение под коды перестало ловить что-либо, и проверка падала
+// с «не смог вычитать списки» — громко, но не по делу.
+const QUOTED = /'([a-z][a-z0-9-]*)'/g;
+
 const idsOf = (source, name) => {
   const block = source.match(new RegExp(`export type ${name}[\\s\\S]*?;`));
-  return block ? [...block[0].matchAll(/'([A-Z]+\d*)'/g)].map((m) => m[1]) : [];
+  return block ? [...block[0].matchAll(QUOTED)].map((m) => m[1]) : [];
 };
 
 const bucketOf = (page, name) => {
   const block = page.match(new RegExp(`const ${name} = new Set\\(\\[[\\s\\S]*?\\]`));
-  return block ? [...block[0].matchAll(/'([A-Z]+\d*)'/g)].map((m) => m[1]) : [];
+  return block ? [...block[0].matchAll(QUOTED)].map((m) => m[1]) : [];
 };
 
 let schemas;
