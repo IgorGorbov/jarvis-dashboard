@@ -3,7 +3,7 @@ import {createServer} from 'node:http';
 import {readFile, readdir, stat, open} from 'node:fs/promises';
 import path from 'node:path';
 import {fileURLToPath} from 'node:url';
-import {agentError, agentText, normalizeOutcome, splitRunDir} from './lib.mjs';
+import {agentError, agentText, parseRun, runSummary, splitRunDir} from './lib.mjs';
 
 const HERE = path.dirname(fileURLToPath(import.meta.url));
 const ROOT = path.resolve(
@@ -17,6 +17,15 @@ const POLL_MS = 500;
 const TAIL_BYTES = 256 * 1024;
 
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
+
+/** Файл, которого может не быть: прогон мог оборваться до первой записи. */
+const readText = async (file) => {
+  try {
+    return await readFile(file, 'utf8');
+  } catch {
+    return '';
+  }
+};
 
 const readJson = async (file) => {
   try {
@@ -70,32 +79,23 @@ const listRuns = async () => {
     if (!entry.isDirectory() || entry.name === 'pending') continue;
     const split = splitRunDir(entry.name);
     if (!split) continue;
-    const dir = path.join(ROOT, entry.name);
-    const [meta, resume, result] = await Promise.all([
-      readJson(path.join(dir, 'meta.json')),
-      readJson(path.join(dir, 'meta.resume.json')),
-      readJson(path.join(dir, 'result.json')),
-    ]);
+    // Файл прогона читается целиком: замер — 1.7–2.1 КБ на прогон, задание
+    // кодеру в него больше не кладут. Понадобится — контракт разрешает читать
+    // голову и хвост, порядок строк в нём зафиксирован.
     byTag.set(split.runTag, {
       ...split,
       dir: entry.name,
-      model: meta?.model,
-      startedAt: meta?.startedAt,
-      finishedAt: resume?.finishedAt ?? meta?.finishedAt,
-      resumed: Boolean(resume),
-      // Продолжение после ответа человека — последнее слово о судьбе прогона,
-      // но если в нём исхода нет, берём его из первой сессии.
-      outcome: normalizeOutcome(result, resume) ?? normalizeOutcome(result, meta),
+      ...runSummary(parseRun(await readText(path.join(ROOT, entry.name, 'run.jsonl')))),
     });
   }
 
   // Каждый входящий запрос получает свою метку прогона, но прогоном становится
   // не каждый. Заводим запись только там, где иначе не останется следа:
-  //   M6 — работа началась;
-  //   M3, M4 — задачу не взяли, папки не будет, показать больше нечего.
-  // Не заводим: M1 и M7 относятся к идущему прогону, а M5 — отбитый дубль
-  // запроса по задаче, которая и так в списке своим настоящим прогоном.
-  const OWN_RUN = new Set(['M3', 'M4', 'M6']);
+  //   accepted — работа началась;
+  //   classify-failed, not-a-task — задачу не взяли, папки не будет.
+  // Не заводим: answer и cancel-requested относятся к идущему прогону, а busy —
+  // отбитый дубль запроса по задаче, которая и так в списке своим прогоном.
+  const OWN_RUN = new Set(['classify-failed', 'not-a-task', 'accepted']);
 
   for (const row of await readJournal()) {
     const tag = row.runTag;
@@ -130,27 +130,22 @@ const listRuns = async () => {
   return {root: ROOT, runs};
 };
 
-const RUN_ARTIFACTS = /^(analysis|claims|result|meta|meta\.resume|verify|checks\.\d+|review\.\d+|code\.\d+)\.json$/;
-
 const runDetail = async (tag) => {
   const {runs} = await listRuns();
   const run = runs.find((r) => r.runTag === tag);
   if (!run) return undefined;
-  if (!run.dir) return {run, files: [], json: {}};
+  if (!run.dir) return {run, files: [], rows: []};
 
   const dir = path.join(ROOT, run.dir);
   let names = [];
   try {
     names = await readdir(dir);
   } catch {
-    return {run, files: [], json: {}};
+    return {run, files: [], rows: []};
   }
-  const json = {};
-  for (const name of names.filter((n) => RUN_ARTIFACTS.test(n))) {
-    json[name] = await readJson(path.join(dir, name));
-  }
+  const rows = parseRun(await readText(path.join(dir, 'run.jsonl')));
   const {tools, ...totals} = await traceTotals(dir);
-  return {run, files: names.sort(), json, ...totals};
+  return {run, files: names.sort(), rows, ...totals};
 };
 
 /**

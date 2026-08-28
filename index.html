@@ -172,6 +172,8 @@
   .row.hold .who, .row.hold .what { color:var(--warn); }
   .row.ms .who, .row.ms .what { color:var(--dim); }
   .what { white-space:pre-wrap; overflow-wrap:anywhere; }
+  .out { max-height:14rem; overflow:auto; font-size:10px; line-height:1.35;
+         background:#0d1420; padding:.4rem .5rem; border-radius:3px; color:var(--dim); }
   .empty { color:var(--faint); padding:1rem .9rem; }
 
   /* Пути и имена файлов — единый токен без пробелов: без принудительного
@@ -683,65 +685,82 @@ const active = (run) =>
 
 function renderSide() {
   if (!detail) { el('side').innerHTML = '<div class="label">Артефакты</div>'; return; }
-  const {run, json, files} = detail;
-  const analysis = json['analysis.json'];
-  const result = json['result.json'];
-  const checks = Object.keys(json).filter((n) => n.startsWith('checks.')).sort().pop();
+  const {run, rows, files} = detail;
+  const of = (kind) => rows.filter((r) => r.kind === kind);
+  const last = (kind) => of(kind)[of(kind).length - 1];
   const cards = [];
 
   cards.push(`<div class="card"><h4>${esc(run.runTag)} · ${esc(run.taskRef)}</h4>
     <p>${esc(run.model ?? active(run) ?? 'модель не записана')}</p>
+    ${run.continues ? `<p style="color:var(--dim)">продолжает разбор прогона ${esc(run.continues)}</p>` : ''}
     ${run.resumed ? '<p style="color:var(--warn)">прогон продолжался после ответа</p>' : ''}</div>`);
 
-  if (result) {
-    const url = result.prUrl;
-    cards.push(`<div class="card"><h4>Исход · ${esc(result.kind ?? (url ? 'pr' : '—'))}</h4>
+  const outcome = run.outcome;
+  if (outcome?.kind) {
+    const url = outcome.prUrl;
+    cards.push(`<div class="card"><h4>Исход · ${esc(outcome.kind)}</h4>
       ${url ? `<p>${prLink(url, '↗ ' + url.split('/').pop(), `PR прогона ${run.runTag}`)}</p>` : ''}
-      ${result.reason ? `<p style="color:var(--bad)">${esc(result.reason)}</p>` : ''}
-      ${result.branch ? `<p style="color:var(--dim)">${esc(result.branch)}</p>` : ''}</div>`);
+      ${outcome.reason ? `<p style="color:var(--dim)">${esc(outcome.reason)}</p>` : ''}
+      ${outcome.branch ? `<p style="color:var(--dim)">${esc(outcome.branch)}</p>` : ''}</div>`);
   }
 
-  // `result.json` пишет только шаг `pr`. Прогон, вставший раньше, исход имеет —
-  // он в `meta`, — но файла результата у него нет, и «прозой» это называть нельзя.
-  if (!result && run.outcome?.reason) {
-    const legacy = run.outcome.kind === 'проза';
-    cards.push(`<div class="card"><h4>Исход · ${esc(legacy ? 'записан прозой' : run.outcome.kind)}</h4>
-      <p style="color:var(--dim)">${esc(run.outcome.reason)}</p></div>`);
+  // Продолженный прогон разбор не переписывает — он лежит в прогоне-родителе.
+  const analysis = last('analysis');
+  if (!analysis && run.continues) {
+    cards.push(`<div class="card"><h4>Как понял задачу</h4>
+      <p class="hint">разбор взят у прогона ${esc(run.continues)} — он там же и записан</p></div>`);
   }
-
   if (analysis?.summary) {
     cards.push(`<div class="card"><h4>Как понял задачу</h4><p>${esc(analysis.summary)}</p></div>`);
   }
   if (analysis?.plan?.length) {
     cards.push(`<div class="card"><h4>План · ${analysis.plan.length}</h4>
-      <ul>${analysis.plan.map((s) => `<li>${esc(s)}</li>`).join('')}</ul></div>`);
+      <ul>${analysis.plan.map((step) => `<li>${esc(step)}</li>`).join('')}</ul></div>`);
   }
   if (analysis?.questions?.length) {
     cards.push(`<div class="card"><h4>Вопросы · ${analysis.questions.length}</h4>
       <ul>${analysis.questions.map((q) => `<li style="color:var(--warn)">${esc(q)}</li>`).join('')}</ul></div>`);
   }
-  if (checks && json[checks]) {
-    const c = json[checks];
-    const attempt = checks.split('.')[1];
-    // Лог проверки — ссылкой: без неё «typecheck ✕» не отвечает на «что именно».
+
+  const checks = last('checks');
+  if (checks) {
+    // Вывод упавшей проверки приходит в самой строке — отдельных логов больше
+    // нет. Показываем его тут же: «typecheck ✕» без «что именно» бесполезно.
+    const failed = new Map((checks.failures ?? []).map((f) => [f.check, f.output]));
     const chip = (r) => {
       const text = `${r.check} ${r.ok ? '✓' : '✕'} ${secs(r.durationMs ?? 0)}`;
-      const name = `checks.${attempt}.${r.check}.log`;
-      const colour = r.ok ? 'var(--ok)' : 'var(--bad)';
-      return files.includes(name)
-        ? `<a href="/api/file?tag=${encodeURIComponent(run.runTag)}&name=${encodeURIComponent(name)}"
-              target="_blank" rel="noreferrer" style="color:${colour}"
-              title="открыть ${esc(name)}">${esc(text)}</a>`
-        : `<span style="color:${colour}">${esc(text)}</span>`;
+      return `<span style="color:${r.ok ? 'var(--ok)' : 'var(--bad)'}">${esc(text)}</span>`;
     };
-    cards.push(`<div class="card"><h4>Проверки · попытка ${esc(attempt)}</h4><p>${
-      (c.ran ?? []).map(chip).join(' · ')}</p>
-    ${c.blocked ? `<p style="color:var(--warn)">не смогла отработать: ${esc(c.blocked)}</p>` : ''}</div>`);
+    const output = (checks.ran ?? [])
+      .filter((r) => !r.ok)
+      .map((r) => r.output ?? failed.get(r.check))
+      .filter(Boolean);
+    cards.push(`<div class="card"><h4>Проверки · попытка ${esc(checks.attempt ?? '—')}</h4>
+      <p>${(checks.ran ?? []).map(chip).join(' · ')}</p>
+      ${checks.blocked ? `<p style="color:var(--warn)">не смогла отработать: ${esc(checks.blocked)}</p>` : ''}
+      ${output.map((text) => `<pre class="out">${esc(text)}</pre>`).join('')}</div>`);
   }
+
+  const review = last('review');
+  if (review) {
+    cards.push(`<div class="card"><h4>Ревью · попытка ${esc(review.attempt ?? '—')} · ${esc(review.verdict ?? '—')}</h4>
+      ${review.summary ? `<p>${esc(review.summary)}</p>` : ''}
+      ${review.findings?.length
+        ? `<ul>${review.findings.map((f) => `<li style="color:var(--warn)">${esc(f)}</li>`).join('')}</ul>`
+        : ''}</div>`);
+  }
+
+  const implement = last('implement');
+  if (implement?.summary) {
+    cards.push(`<div class="card"><h4>Правка · попытка ${esc(implement.attempt ?? '—')}</h4>
+      <p>${esc(implement.summary)}</p>
+      ${implement.prTitle ? `<p style="color:var(--dim)">${esc(implement.prType ?? '')}: ${esc(implement.prTitle)}</p>` : ''}
+      ${implement.blocked ? `<p style="color:var(--warn)">упёрся: ${esc(implement.blocked)}</p>` : ''}</div>`);
+  }
+
   // Диф оборванного прогона — первым: при обрыве ветка удаляется, и работа
-  // больше нигде не существует. Финальный диф лежит в PR или в оставшейся
-  // ветке, поэтому он тут удобство, а этот — единственная копия.
-  const patch = ['diff.aborted.patch', 'diff.final.patch', 'diff.patch']
+  // больше нигде не существует. Финальный лежит в PR или в оставшейся ветке.
+  const patch = ['diff.aborted.patch', 'diff.final.patch']
     .find((name) => files.includes(name));
   if (patch) {
     cards.push(`<div class="card"><h4>Диф · ${esc(patch)}</h4>
@@ -892,9 +911,8 @@ async function renderAsked() {
     let questions = [];
     try {
       const info = await (await fetch(`/api/run?tag=${encodeURIComponent(item.runTag)}`)).json();
-      questions = info.json?.['analysis.json']?.questions
-        ?? info.json?.['meta.json']?.ended?.questions
-        ?? [];
+      const analysis = (info.rows ?? []).filter((r) => r.kind === 'analysis').pop();
+      questions = analysis?.questions ?? [];
     } catch {
       questions = [];
     }

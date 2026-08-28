@@ -1,6 +1,6 @@
 /**
- * Чистые разборщики: артефакты писались тремя разными способами, а ответы агента
- * приходят в двух формах. Здесь нет ни диска, ни сети — только это и тестируется.
+ * Чистые разборщики файла прогона и ответов агента. Здесь нет ни диска, ни сети —
+ * только это и тестируется.
  */
 
 /**
@@ -15,31 +15,61 @@ export const splitRunDir = (name) => {
 };
 
 /**
- * Форматов исхода в артефактах три, и все живые: `result.json` с размеченным
- * `kind`, `meta.ended` нынешних прогонов и `prOpened`/`meta.outcome` старых.
+ * Файл прогона: строка на факт, вид в поле `kind`. Порядок — контракт: `session`
+ * первой, `session-end` последней. Недописанную последнюю строку пропускаем —
+ * файл могли читать в момент дозаписи.
  */
-export const normalizeOutcome = (result, meta) => {
-  if (result?.kind) {
-    return {kind: result.kind, prUrl: result.prUrl, reason: result.reason};
+export const parseRun = (text) => {
+  const rows = [];
+  for (const line of String(text ?? '').split('\n')) {
+    if (!line.trim()) continue;
+    try {
+      rows.push(JSON.parse(line));
+    } catch {
+      // Строка ещё пишется: следующее чтение её застанет целой.
+    }
   }
-  if (result?.prOpened || result?.prUrl) {
-    return {kind: 'pr', prUrl: result.prUrl};
+  return rows;
+};
+
+/**
+ * Сводка прогона из его строк: то, что нужно списку, — без разбора середины.
+ * Сессий может быть несколько: анализ спросил, человек ответил через час, прогон
+ * поехал дальше под той же меткой. Работа и ожидание не складываются.
+ */
+export const runSummary = (rows) => {
+  const sessions = rows.filter((r) => r.kind === 'session');
+  const ends = rows.filter((r) => r.kind === 'session-end');
+  const first = sessions[0];
+  const last = ends[ends.length - 1];
+  return {
+    model: first?.model,
+    continues: first?.continues,
+    startedAt: first?.at,
+    finishedAt: last?.at,
+    resumed: sessions.length > 1,
+    outcome: normalizeOutcome(last?.ended),
+  };
+};
+
+/**
+ * Исход сессии. `Ended` в агенте — четыре вида: `outcome` несёт исход конвейера,
+ * остальные три (`asked`, `cancelled`, `failed`) сами и есть исход. Без второй
+ * ветки отменённый прогон был бы неотличим от упавшего.
+ */
+export const normalizeOutcome = (ended) => {
+  if (!ended?.kind) return undefined;
+  if (ended.kind === 'outcome') {
+    const out = ended.outcome;
+    return out?.kind
+      ? {kind: out.kind, prUrl: out.prUrl, branch: out.branch, reason: out.reason ?? out.summary}
+      : undefined;
   }
-  const ended = meta?.ended;
-  if (ended?.kind === 'outcome' && ended.outcome?.kind) {
-    const {kind, prUrl, reason} = ended.outcome;
-    return {kind, prUrl, reason};
-  }
-  // `asked` — прогон встал на вопросах к человеку.
-  if (ended?.kind) return {kind: ended.kind, questions: ended.questions?.length};
-  if (meta?.outcome?.kind) return {kind: meta.outcome.kind};
-  // Прогоны до 13 августа писали исход прозой. Разбирать её не будем, но ссылку
-  // на PR вытащим — по ней история чем-то полезна.
-  if (typeof meta?.outcome === 'string') {
-    const link = meta.outcome.match(/https:\/\/github\.com\S+/);
-    return link ? {kind: 'pr', prUrl: link[0]} : {kind: 'проза', reason: meta.outcome};
-  }
-  return undefined;
+  return {
+    kind: ended.kind,
+    reason: ended.reason,
+    questions: ended.questions?.length,
+  };
 };
 
 /**
