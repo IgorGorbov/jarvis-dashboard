@@ -44,7 +44,9 @@ export const runSummary = (rows) => {
   const last = ends[ends.length - 1];
   return {
     model: first?.model,
-    continues: first?.continues,
+    // Связь с прогоном-родителем агент кладёт в строку разбора, а не сессии:
+    // берём из любой, где она есть, — место в файле не наше дело.
+    continues: rows.find((r) => r.continues)?.continues,
     startedAt: first?.at,
     finishedAt: last?.at,
     resumed: sessions.length > 1,

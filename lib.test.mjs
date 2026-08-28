@@ -59,7 +59,9 @@ test('файл прогона: недописанная строка не рон
 
 test('сводка прогона: несколько сессий — работа и ожидание не складываются', () => {
   const rows = parseRun([
-    '{"kind":"session","at":"09:18","model":"sonnet","continues":"abc"}',
+    '{"kind":"session","at":"09:18","model":"sonnet"}',
+    // Связь с родителем лежит в строке разбора, а не сессии.
+    '{"kind":"analysis","at":"09:20","continues":"abc"}',
     '{"kind":"session-end","at":"10:50","ended":{"kind":"asked","questions":["q"]}}',
     '{"kind":"session","at":"12:06"}',
     '{"kind":"session-end","at":"12:09","ended":{"kind":"outcome","outcome":{"kind":"pr"}}}',
