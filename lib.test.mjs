@@ -78,6 +78,19 @@ test('сводка прогона: несколько сессий — рабо�
   });
 });
 
+test('сводка прогона: run-end перевешивает конец последней сессии', () => {
+  // Снятый с ожидания: сессия закрылась вопросами, а прогон кончился отменой.
+  // По последней сессии он выглядел бы ждущим ответа, которого никто не даст.
+  const rows = parseRun([
+    '{"kind":"session","at":"12:39"}',
+    '{"kind":"session-end","at":"12:52","ended":{"kind":"asked","questions":["q"]}}',
+    '{"kind":"run-end","at":"12:53","ended":{"kind":"cancelled","reason":"человек"}}',
+  ].join('\n'));
+  const summary = runSummary(rows);
+  assert.equal(summary.outcome.kind, 'cancelled');
+  assert.equal(summary.finishedAt, '12:53');
+});
+
 test('сводка прогона: идущий прогон ещё без исхода', () => {
   const rows = parseRun('{"kind":"session","at":"09:18","model":"opus"}');
   const summary = runSummary(rows);

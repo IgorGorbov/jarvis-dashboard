@@ -41,7 +41,10 @@ export const runSummary = (rows) => {
   const sessions = rows.filter((r) => r.kind === 'session');
   const ends = rows.filter((r) => r.kind === 'session-end');
   const first = sessions[0];
-  const last = ends[ends.length - 1];
+  // `run-end` — последнее слово о судьбе прогона, и оно не всегда совпадает с
+  // концом последней сессии: прогон, снятый с ожидания, закрывает сессию видом
+  // `asked`, а сам кончается отменой. Без этого отменённый выглядел ждущим.
+  const last = rows.findLast((r) => r.kind === 'run-end') ?? ends[ends.length - 1];
   return {
     model: first?.model,
     // Связь с прогоном-родителем агент кладёт в строку разбора, а не сессии:
