@@ -451,7 +451,7 @@ function renderStrip() {
     rows.filter((e) => e.ms !== undefined && !isLoop(e)).map((e) => e.stage),
   );
   const stopped = rows.find((e) => e.decision && STOP.has(e.decision) && e.stage);
-  const published = rows.some((e) => e.decision === 'PR4');
+  const published = rows.some((e) => e.decision === 'pr-opened');
   const attempts = rows.filter((e) => typeof e.attempt === 'number').map((e) => e.attempt);
   const attempt = attempts.length ? Math.max(...attempts) : 0;
 
@@ -473,8 +473,11 @@ function renderStrip() {
     : undefined;
 
   // Где прогон встал, если он уже не идёт и до PR не дошёл: последнее событие и
-  // есть точка остановки. Без этого полоса показывала «analyze ✓» и пустоту.
-  const lastEvent = rows[rows.length - 1];
+  // есть точка остановки. Берём последнее событие *со стадией*: в ленту прогона
+  // подмешиваются входящие — ответ и запрос отмены, — и у них стадии нет. Запрос
+  // отмены приходит последним, и полоса у прогона, снятого с ожидания, гасла
+  // целиком: ни галочки, ни паузы, ни креста.
+  const lastEvent = [...rows].reverse().find((e) => e.stage);
   const halted =
     !running && !published && lastEvent?.stage ? lastEvent.stage : undefined;
   // Отмену агент помечает исходом, поэтому шаг, на котором прогон погас, — это
@@ -898,7 +901,7 @@ function awaitingConfirmation() {
   // задачу, а не метку: иначе блок висит после успешного подтверждения и зовёт
   // нажать второй раз — агент на это отвечает отказом по занятости.
   return [...newest.values()].filter(
-    (run) => run.lastDecision === 'A5' && run.taskRef !== snapshot.active?.taskRef,
+    (run) => run.lastDecision === 'needs-confirmation' && run.taskRef !== snapshot.active?.taskRef,
   );
 }
 
@@ -1076,7 +1079,7 @@ stream.onmessage = (message) => {
     if (live && event.runTag && !runs.some((r) => r.runTag === event.runTag)) {
       loadRuns().then(() => {
         // Запуск: человек только что нажал и хочет смотреть именно на этот прогон.
-        if (event.decision === 'M6') select(event.runTag);
+        if (event.decision === 'accepted') select(event.runTag);
       });
     }
     if (event.runTag === selected) { renderFeed(); renderStrip(); }

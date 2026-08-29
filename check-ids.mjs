@@ -83,6 +83,16 @@ const missing = declared.filter((id) => !known.has(id));
 const stale = [...known].filter((id) => !declared.includes(id));
 const missingKinds = kinds.filter((kind) => !knownKinds.has(kind));
 
+// Переименование решений в имена (`1c63064`) оставило в странице три литерала
+// старой схемы — `PR4`, `A5`, `M6`, — и все три лежали вне корзин цвета, поэтому
+// сверка выше их не видела. Каждый молча ломал своё: зелёный `pr`, блок
+// подтверждения понимания целиком, выбор только что запущенного прогона.
+const OLD_CODES = [...page.matchAll(/'((?:A|I|C|R|P|PR|M)\d)'/g)].map((m) => m[1]);
+if (OLD_CODES.length) {
+  process.stdout.write(`в панели остались коды старой схемы: ${[...new Set(OLD_CODES)].join(', ')}\n`);
+  process.exit(1);
+}
+
 if (missing.length === 0 && stale.length === 0 && missingKinds.length === 0) {
   process.stdout.write(
     `идентификаторы: все ${declared.length} разложены, виды исхода (${kinds.length}) тоже\n`,
