@@ -363,8 +363,12 @@ const mine = () => {
     .map((r) => r.startedAt)
     .filter((at) => at && startedAt && at > startedAt)
     .sort()[0];
+  // Запрос отмены называет свою жертву полем `target` — привязка точная, а не по
+  // окну времени. Окно остаётся для входящих без него (ответ на вопросы).
+  const aimed = events.filter((e) => e.target === selected);
   const attached = events.filter(
     (e) =>
+      !e.target &&
       e.replyKey === run.taskRef &&
       e.runTag !== selected &&
       // У события запуска есть собственный прогон — чужим его не приписываем.
@@ -375,7 +379,7 @@ const mine = () => {
       startedAt && e.at >= startedAt &&
       (!nextStart || e.at < nextStart),
   );
-  return [...own, ...attached].sort((a, b) => a.at.localeCompare(b.at));
+  return [...own, ...aimed, ...attached].sort((a, b) => a.at.localeCompare(b.at));
 };
 
 /** Ссылка на PR нужна чаще для вставки, чем для перехода: клик копирует. */
