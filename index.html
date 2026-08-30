@@ -809,7 +809,10 @@ async function showTrace(tag) {
     // «0.0 с». Время у строки стоит, только когда его стоит заметить, а общее
     // ушло в шапку.
     const spent = tools.reduce((sum, t) => sum + (t.ms ?? 0), 0);
-    const head = `<div class="empty">${tools.length} вызовов · ${spent >= 60000 ? secs(spent) : Math.round(spent / 1000) + ' с'} всего</div>`;
+    // «74 вызовов» — неверное согласование, а число меняется каждый прогон.
+    // Форма «вызовов: N» верна при любом, и она же у соседних карточек списком.
+    const head = `<div class="empty">вызовов: ${tools.length} · всего ${
+      spent >= 60000 ? secs(spent) : Math.round(spent / 1000) + ' с'}</div>`;
     el('trace').innerHTML = tools.length
       ? head + tools.map((t) => row(t.at, t.tool,
           `${t.target ?? ''}${t.ms >= 1000 ? ` · ${secs(t.ms)}` : ''}`, 'ms')).join('')
