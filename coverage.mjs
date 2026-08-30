@@ -18,8 +18,12 @@ import path from 'node:path';
 import {fileURLToPath} from 'node:url';
 
 const HERE = path.dirname(fileURLToPath(import.meta.url));
+// Путь — первый аргумент, который не флаг: иначе `--short` уезжал в ROOT,
+// скрипт читал несуществующий каталог и печатал старое число из накопителя,
+// ничего не досчитывая. Ровно тот молчаливый отказ, против которого он написан.
 const ROOT = path.resolve(
-  process.argv[2] ?? path.join(HERE, '..', 'agents', 'artifacts', 'jarvis'),
+  process.argv.slice(2).find((a) => !a.startsWith('--')) ??
+    path.join(HERE, '..', 'agents', 'artifacts', 'jarvis'),
 );
 const SCHEMAS = path.join(
   HERE, '..', 'agents', 'src', 'agents', 'jarvis', 'internal', 'schemas.ts',
