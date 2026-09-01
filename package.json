@@ -9,7 +9,7 @@
   "scripts": {
     "start": "node dash.mjs",
     "dev": "node --watch dash.mjs",
-    "test": "node --test && node check-page.mjs && node check-ids.mjs && node coverage.mjs --short",
-    "coverage": "node coverage.mjs"
+    "coverage": "node coverage.mjs",
+    "test": "node --test && node check-page.mjs && node check-ids.mjs && node coverage.mjs --short"
   }
 }

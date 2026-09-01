@@ -1,4 +1,5 @@
 #!/usr/bin/env node
+import './env.mjs';
 import {createServer} from 'node:http';
 import {readFile, readdir, stat, open} from 'node:fs/promises';
 import path from 'node:path';
@@ -6,8 +7,13 @@ import {fileURLToPath} from 'node:url';
 import {agentError, agentText, parseRun, runSummary, splitRunDir} from './lib.mjs';
 
 const HERE = path.dirname(fileURLToPath(import.meta.url));
+// Порядок: аргумент → переменная окружения (в том числе из `.env`) → сосед по
+// каталогу. Аргумент главнее переменной, чтобы поднять вторую панель на чужих
+// артефактах, не трогая файл настроек.
 const ROOT = path.resolve(
-  process.argv[2] ?? path.join(HERE, '..', 'agents', 'artifacts', 'jarvis'),
+  process.argv[2] ??
+    process.env.JARVIS_ARTIFACTS ??
+    path.join(HERE, '..', 'agents', 'artifacts', 'jarvis'),
 );
 const JOURNAL = path.join(ROOT, 'events.jsonl');
 const PORT = Number(process.env.PORT ?? 4100);

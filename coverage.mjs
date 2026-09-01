@@ -13,6 +13,7 @@
  * только в Mattermost, часть срабатывает лишь на браке модели. Это отчёт, а не
  * ворота.
  */
+import './env.mjs';
 import {readFile, writeFile} from 'node:fs/promises';
 import path from 'node:path';
 import {fileURLToPath} from 'node:url';
@@ -23,11 +24,12 @@ const HERE = path.dirname(fileURLToPath(import.meta.url));
 // ничего не досчитывая. Ровно тот молчаливый отказ, против которого он написан.
 const ROOT = path.resolve(
   process.argv.slice(2).find((a) => !a.startsWith('--')) ??
+    process.env.JARVIS_ARTIFACTS ??
     path.join(HERE, '..', 'agents', 'artifacts', 'jarvis'),
 );
-const SCHEMAS = path.join(
-  HERE, '..', 'agents', 'src', 'agents', 'jarvis', 'internal', 'schemas.ts',
-);
+const SCHEMAS = process.env.JARVIS_SCHEMAS
+  ? path.resolve(process.env.JARVIS_SCHEMAS)
+  : path.join(HERE, '..', 'agents', 'src', 'agents', 'jarvis', 'internal', 'schemas.ts');
 const TALLY = path.join(HERE, 'coverage.json');
 
 const read = async (file) => {

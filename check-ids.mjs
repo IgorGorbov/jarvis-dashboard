@@ -8,12 +8,12 @@
  *
  * Репозиторий агентов рядом не обязателен: если его нет, проверка пропускается.
  */
+import './env.mjs';
 import {readFile} from 'node:fs/promises';
 
-const AGENT_SCHEMAS = new URL(
-  '../agents/src/agents/jarvis/internal/schemas.ts',
-  import.meta.url,
-);
+const AGENT_SCHEMAS = process.env.JARVIS_SCHEMAS
+  ? new URL(`file://${process.env.JARVIS_SCHEMAS}`)
+  : new URL('../agents/src/agents/jarvis/internal/schemas.ts', import.meta.url);
 
 // С `1c63064` идентификаторы — говорящие имена в кебаб-кейсе, а не коды вроде
 // `A5`. Прежнее выражение под коды перестало ловить что-либо, и проверка падала
