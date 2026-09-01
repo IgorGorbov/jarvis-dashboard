@@ -57,6 +57,11 @@ const scenarios = JSON.parse(await read(path.join(HERE, 'scenarios.json')));
 // Новое решение агента без сценария — такая же дыра, как непокрытое: про него
 // никто не вспомнит, потому что его нет ни в одном списке.
 const orphans = declared.filter((id) => !scenarios[id]);
+// Обратная сторона: решение переименовали, а сценарий остался. Он не мешает,
+// но описывает то, чего нет, и однажды его прочтут как задание.
+const stale = Object.keys(scenarios).filter(
+  (id) => id !== '_' && !declared.includes(id),
+);
 
 const tally = JSON.parse((await read(TALLY)) ?? '{}');
 const journal = (await read(path.join(ROOT, 'events.jsonl'))) ?? '';
@@ -88,6 +93,9 @@ process.stdout.write(
 
 if (orphans.length) {
   process.stdout.write(`  БЕЗ СЦЕНАРИЯ в scenarios.json: ${orphans.join(', ')}\n`);
+}
+if (stale.length) {
+  process.stdout.write(`  СЦЕНАРИЙ БЕЗ РЕШЕНИЯ, агент такого не знает: ${stale.join(', ')}\n`);
 }
 
 if (process.argv.includes('--short')) process.exit(0);

@@ -55,11 +55,18 @@ const kindBucket = (name) =>
   (page.match(new RegExp(`const ${name} = new Set\\(\\[[\\s\\S]*?\\]`)) ?? [''])[0]
     .match(/'([^']+)'/g)?.map((q) => q.slice(1, -1)) ?? [];
 
+// `jarvis.ts` лежит рядом со схемами — в том числе когда путь к ним задан
+// переменной. Раньше он искался только по соседству с панелью: при заданном
+// `JARVIS_SCHEMAS` проверка молча худела с восьми видов исхода до пяти и всё
+// равно печатала «тоже». Теперь молчания нет.
+const AGENT_JARVIS = new URL('jarvis.ts', AGENT_SCHEMAS);
 let jarvis = '';
 try {
-  jarvis = await readFile(new URL('../agents/src/agents/jarvis/internal/jarvis.ts', import.meta.url), 'utf8');
+  jarvis = await readFile(AGENT_JARVIS, 'utf8');
 } catch {
-  // Файл мог переехать при рефакторинге: тогда сверяем только схему исходов.
+  process.stdout.write(
+    'идентификаторы: jarvis.ts не найден — виды исхода прогона не сверяются\n',
+  );
 }
 
 // `{kind: 'outcome', outcome: {...}}` — обёртка вокруг исхода конвейера, а не
