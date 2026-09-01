@@ -2,3 +2,4 @@
 .idea/
 fixtures/artifacts/
 .env
+coverage.json
