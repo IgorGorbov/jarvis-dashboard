@@ -857,7 +857,7 @@ function renderState() {
   const stop = el('stop');
   stop.disabled = !active;
   stop.title = active
-    ? `отменить ${active.taskRef} — работа уйдёт в stash`
+    ? `отменить ${active.taskRef} — незавершённые правки сохранятся патчем`
     : 'нечего отменять';
 }
 
@@ -984,7 +984,7 @@ async function renderAsked() {
   }
 }
 
-/** Работа не теряется: агент кладёт её в stash и говорит об этом в ответе. */
+/** Работа не теряется: агент сохраняет незавершённые правки патчем и говорит об этом в ответе. */
 async function cancel(taskRef, question) {
   if (!confirm(question)) return;
   try {
@@ -1142,7 +1142,7 @@ for (const tab of document.querySelectorAll('.tab')) {
 el('stop').onclick = () => {
   const active = snapshot.active;
   if (!active) return;
-  cancel(active.taskRef, `Отменить ${active.taskRef}? Работа уйдёт в stash.`);
+  cancel(active.taskRef, `Отменить ${active.taskRef}? Незавершённые правки сохранятся патчем.`);
 };
 
 setupToggle('toggle-rail', 'rail', 'panel.rail');
