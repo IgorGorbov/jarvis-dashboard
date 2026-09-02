@@ -684,8 +684,9 @@ function renderRail() {
 /* ---------- артефакты выбранного прогона ---------- */
 
 /**
- * `meta.json` пишется в конце прогона, поэтому у идущего модели там ещё нет.
- * Пока он идёт, её знает снимок — там же, откуда берётся полоса срока.
+ * Модель идущего прогона берём из снимка машины — оттуда же, откуда полоса
+ * срока. В файле прогона она есть, но снимок отвечает быстрее и точно про то,
+ * что работает прямо сейчас.
  */
 const active = (run) =>
   snapshot.active?.runTag === run.runTag ? snapshot.active.model : undefined;
@@ -898,18 +899,21 @@ async function loadRuns() {
  * припаркован, а сохранил разбор и закончился. Ответ ему — не текст, а повторный
  * запуск с галочкой, поэтому и блок отдельный, с одной кнопкой.
  */
+/**
+ * Ждут подтверждения — по каталогу `pending/`, а не по последнему решению.
+ *
+ * Раньше брался самый свежий прогон задачи с решением `needs-confirmation`. У
+ * прямых запусков метка задачи общая (`no-task`), поэтому любой следующий прогон
+ * — хоть неудачная попытка подтвердить — заслонял собой настоящий ждущий, и блок
+ * молча пропадал вместе с кнопкой. Сохранённый разбор лежит файлом и знает свою
+ * метку прогона: это факт, а не догадка.
+ */
+let pending = [];
+
 function awaitingConfirmation() {
-  const newest = new Map();
-  for (const run of runs) {
-    const seen = newest.get(run.taskRef);
-    if (!seen || (run.startedAt ?? '') > (seen.startedAt ?? '')) newest.set(run.taskRef, run);
-  }
-  // Подтверждение создаёт новый прогон со своей меткой, поэтому сравнивать надо
-  // задачу, а не метку: иначе блок висит после успешного подтверждения и зовёт
-  // нажать второй раз — агент на это отвечает отказом по занятости.
-  return [...newest.values()].filter(
-    (run) => run.lastDecision === 'needs-confirmation' && run.taskRef !== snapshot.active?.taskRef,
-  );
+  return pending
+    .map((p) => ({...(runs.find((r) => r.runTag === p.runTag) ?? {runTag: p.runTag, taskRef: '—'}), text: p.text}))
+    .filter((run) => run.taskRef !== snapshot.active?.taskRef);
 }
 
 async function renderAsked() {
@@ -1008,10 +1012,17 @@ async function confirmUnderstanding(runTag, button) {
   button.disabled = true;
   note.textContent = 'отправляю…';
   try {
+    // Разбор в `pending/` найдётся только по точному тексту задачи: агент ищет
+    // его по хешу. Текст помнит сервер панели — тот, кто задачу и отправлял.
+    // Раньше он читался из `issue.txt`, но в нынешнем формате такого файла нет,
+    // и подтверждение уезжало со строкой ошибки вместо постановки.
+    const text = pending.find((w) => w.runTag === runTag)?.text;
+    if (text === undefined) {
+      note.textContent = 'текст задачи не сохранён — подтвердите повторным запуском с галочкой';
+      button.disabled = false;
+      return;
+    }
     const direct = !/^[A-Z]+-\d+$/.test(run.taskRef);
-    const text = direct
-      ? await (await fetch(`/api/file?tag=${encodeURIComponent(runTag)}&name=issue.txt`)).text()
-      : '';
     const reply = await (await fetch('/api/start', {
       method: 'POST',
       headers: {'content-type': 'application/json'},
@@ -1059,6 +1070,11 @@ async function loadState() {
     snapshot = await (await fetch('/api/state')).json();
   } catch {
     snapshot = {phase: 'unknown'};
+  }
+  try {
+    pending = await (await fetch('/api/pending')).json();
+  } catch {
+    // Сервер мог перезапуститься: следующий круг поправит.
   }
   renderState();
   renderStrip();

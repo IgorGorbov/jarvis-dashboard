@@ -1,7 +1,8 @@
 #!/usr/bin/env node
 import './env.mjs';
 import {createServer} from 'node:http';
-import {readFile, readdir, stat, open} from 'node:fs/promises';
+import {readFile, readdir, stat, open, writeFile} from 'node:fs/promises';
+import crypto from 'node:crypto';
 import path from 'node:path';
 import {fileURLToPath} from 'node:url';
 import {agentError, agentText, parseRun, runSummary, splitRunDir} from './lib.mjs';
@@ -25,6 +26,49 @@ const TAIL_BYTES = 256 * 1024;
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 
 /** Файл, которого может не быть: прогон мог оборваться до первой записи. */
+/**
+ * Тексты задач, запущенных из панели, по хешу.
+ *
+ * Разбор, ждущий подтверждения, агент кладёт в `pending/<taskRef>.<sha256 текста>.json`
+ * и ищет строго по этому хешу. Восстановить текст из хеша нельзя, а больше он
+ * нигде не хранится — значит помнить его должен тот, кто задачу отправлял.
+ * Раньше панель брала текст из `issue.txt`, но в нынешнем формате такого файла
+ * нет: подтверждение уезжало со строкой `{"error":"файл не читается"}` и
+ * получало `analysis-not-found`.
+ */
+const LAUNCHED = path.join(HERE, 'launched.json');
+const sha256 = (text) => crypto.createHash('sha256').update(text).digest('hex');
+
+const rememberTask = async (text) => {
+  if (!text) return;
+  const known = (await readJson(LAUNCHED)) ?? {};
+  known[sha256(text)] = text;
+  await writeFile(LAUNCHED, JSON.stringify(known, null, 2) + '\n').catch(() => undefined);
+};
+
+/**
+ * Прогоны, ждущие подтверждения: список берём из `pending/`, а не из последнего
+ * решения — там лежит метка прогона, и файл сам по себе есть доказательство, что
+ * подтверждать ещё есть что.
+ */
+const pendingRuns = async () => {
+  let names = [];
+  try {
+    names = await readdir(path.join(ROOT, 'pending'));
+  } catch {
+    return [];
+  }
+  const known = (await readJson(LAUNCHED)) ?? {};
+  const out = [];
+  for (const name of names.filter((n) => n.endsWith('.json'))) {
+    const hash = name.slice(0, -5).split('.').pop();
+    const saved = await readJson(path.join(ROOT, 'pending', name));
+    if (!saved?.runTag) continue;
+    out.push({runTag: saved.runTag, hash, text: known[hash]});
+  }
+  return out;
+};
+
 const readText = async (file) => {
   try {
     return await readFile(file, 'utf8');
@@ -332,17 +376,19 @@ const callAgent = async (res, metadata, text) => {
 };
 
 const startTask = (req, res) =>
-  readBody(req).then((body) =>
-    callAgent(
+  readBody(req).then(async (body) => {
+    const text = String(body.text ?? '').trim();
+    await rememberTask(text);
+    return callAgent(
       res,
       {
         source: sourceOf(body.issueId),
         understandingConfirmed: Boolean(body.confirmed),
         ...(body.model ? {model: body.model} : {}),
       },
-      String(body.text ?? '').trim(),
-    ),
-  );
+      text,
+    );
+  });
 
 /**
  * Ответ на вопросы анализа. Прогон припаркован под меткой задачи, поэтому ключ —
@@ -387,6 +433,8 @@ const serve = async (req, res) => {
       const snapshot = await readJson(path.join(ROOT, 'state.json'));
       return sendJson(res, snapshot ?? {phase: 'unknown'});
     }
+    case '/api/pending':
+      return sendJson(res, await pendingRuns());
     case '/api/runs':
       return sendJson(res, await listRuns());
     // Лёгкая ручка для живого счётчика: карточки справа при опросе не трогаем.
