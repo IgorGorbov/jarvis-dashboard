@@ -658,7 +658,7 @@ function renderRail() {
       <button type="button" class="pick" data-tag="${esc(r.runTag)}"
         title="${r.continues ? 'продолжает прогон ' + esc(r.continues) : esc(r.runTag)}">
         <i class="dot" style="background:${colour(r)}"></i>
-        <span class="mono">${r.continues ? '↳ ' : ''}${esc(r.runTag)}</span>
+        <span class="mono">${esc(r.runTag)}</span>
         <span class="dim when">${esc(when(r))}</span>
         ${r.outcome?.prUrl ? '' : `<span class="dim kind">${esc(ended(r))}</span>`}
       </button>
