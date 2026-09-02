@@ -27,6 +27,7 @@ try {
 const GONE = [
   'issue.txt', 'meta.json', 'meta.resume.json', 'result.json', 'claims.json',
   'analysis.json', 'questions.md', 'review.json', 'diff.patch', 'events.json',
+  'diff.aborted.patch', 'diff.final.patch',
 ];
 // Смотрим на код, а не на прозу: в комментариях эти имена упоминаются
 // законно — там объясняют, почему их больше нет.
