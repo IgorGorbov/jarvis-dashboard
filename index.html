@@ -577,8 +577,15 @@ function renderBudget(runningStage) {
 /* ---------- список прогонов ---------- */
 
 function renderRail() {
+  // Подтверждение понимания рождает второй прогон: агент завершает первый через
+  // bail() и приходит с новой меткой A2A, а метка — это личность прогона. Слить
+  // их в один нельзя: SendMessage с меткой закрытой задачи отбивается
+  // TASK_NOT_FOUND. Поэтому прогон-разбор в списке не показываем: продолжение
+  // пишет разбор себе (18 пар из 18), так что скрывать нечего.
+  const continued = new Set(runs.map((r) => r.continues).filter(Boolean));
   const byTask = new Map();
   for (const run of runs) {
+    if (continued.has(run.runTag)) continue;
     const key = run.taskRef || 'без задачи';
     if (!byTask.has(key)) byTask.set(key, []);
     byTask.get(key).push(run);
@@ -651,7 +658,7 @@ function renderRail() {
       <button type="button" class="pick" data-tag="${esc(r.runTag)}"
         title="${r.continues ? 'продолжает прогон ' + esc(r.continues) : esc(r.runTag)}">
         <i class="dot" style="background:${colour(r)}"></i>
-        <span class="mono">${r.continues ? '↳ ' : ''}${esc(r.runTag)}</span>
+        <span class="mono">${esc(r.runTag)}</span>
         <span class="dim when">${esc(when(r))}</span>
         ${r.outcome?.prUrl ? '' : `<span class="dim kind">${esc(ended(r))}</span>`}
       </button>
