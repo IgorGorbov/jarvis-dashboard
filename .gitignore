@@ -1,6 +1,7 @@
 .DS_Store
-.idea/
-fixtures/artifacts/
 .env
+.idea/
 coverage.json
+fixtures.mjs
+fixtures/artifacts/
 scenarios.json
