@@ -52,8 +52,8 @@ if (!schemas) {
 }
 
 const declared = [...idsOf(schemas, 'DecisionId'), ...idsOf(schemas, 'IncomingId')];
-// Файл сценариев локальный, в git его нет: на свежей установке счётчик всё
-// равно считает покрытие, просто не подсказывает, чем закрыть дыру.
+// Без файла сценариев покрытие всё равно считается — просто без подсказок,
+// чем закрыть дыру.
 const scenariosRaw = await read(path.join(HERE, 'scenarios.json'));
 const scenarios = scenariosRaw ? JSON.parse(scenariosRaw) : {};
 
