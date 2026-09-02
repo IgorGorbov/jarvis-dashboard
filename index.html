@@ -99,6 +99,12 @@
     background:transparent; border-color:var(--line);
   }
 
+  .link {
+    padding:0; background:transparent; border:0; color:var(--dim);
+    text-decoration:underline; text-underline-offset:2px; cursor:pointer;
+  }
+  .link:hover { color:var(--text); }
+
   .main { display:flex; flex-direction:column; min-width:0; }
   .strip {
     display:flex; align-items:center; gap:.4rem; flex-wrap:wrap;
@@ -577,8 +583,15 @@ function renderBudget(runningStage) {
 /* ---------- список прогонов ---------- */
 
 function renderRail() {
+  // Подтверждение понимания рождает второй прогон: агент завершает первый через
+  // bail() и приходит с новой меткой A2A, а метка — это личность прогона. Слить
+  // их в один нельзя: SendMessage с меткой закрытой задачи отбивается
+  // TASK_NOT_FOUND. Поэтому прогон-разбор в списке не показываем — он виден
+  // изнутри продолжения, по ссылке в карточке «Как понял задачу».
+  const continued = new Set(runs.map((r) => r.continues).filter(Boolean));
   const byTask = new Map();
   for (const run of runs) {
+    if (continued.has(run.runTag)) continue;
     const key = run.taskRef || 'без задачи';
     if (!byTask.has(key)) byTask.set(key, []);
     byTask.get(key).push(run);
@@ -716,7 +729,8 @@ function renderSide() {
   const analysis = last('analysis');
   if (!analysis && run.continues) {
     cards.push(`<div class="card"><h4>Как понял задачу</h4>
-      <p class="hint">разбор взят у прогона ${esc(run.continues)} — он там же и записан</p></div>`);
+      <p class="hint">записан в прогоне-разборе
+        <button type="button" id="open-parent" class="link mono">${esc(run.continues)}</button></p></div>`);
   }
   if (analysis?.summary) {
     cards.push(`<div class="card"><h4>Как понял задачу</h4><p>${esc(analysis.summary)}</p></div>`);
@@ -783,6 +797,8 @@ function renderSide() {
   el('side').innerHTML = '<div class="label" style="padding-left:0">Артефакты</div>' + cards.join('');
   const button = el('show-diff');
   if (button) button.onclick = () => showDiff(run.runTag, button.dataset.name);
+  const parent = el('open-parent');
+  if (parent) parent.onclick = () => select(run.continues);
   el('tab-diff').disabled = !patch;
 }
 
