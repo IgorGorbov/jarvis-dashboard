@@ -3,3 +3,4 @@
 fixtures/artifacts/
 .env
 coverage.json
+scenarios.json

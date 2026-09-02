@@ -52,11 +52,14 @@ if (!schemas) {
 }
 
 const declared = [...idsOf(schemas, 'DecisionId'), ...idsOf(schemas, 'IncomingId')];
-const scenarios = JSON.parse(await read(path.join(HERE, 'scenarios.json')));
+// Файл сценариев локальный, в git его нет: на свежей установке счётчик всё
+// равно считает покрытие, просто не подсказывает, чем закрыть дыру.
+const scenariosRaw = await read(path.join(HERE, 'scenarios.json'));
+const scenarios = scenariosRaw ? JSON.parse(scenariosRaw) : {};
 
 // Новое решение агента без сценария — такая же дыра, как непокрытое: про него
 // никто не вспомнит, потому что его нет ни в одном списке.
-const orphans = declared.filter((id) => !scenarios[id]);
+const orphans = scenariosRaw ? declared.filter((id) => !scenarios[id]) : [];
 // Обратная сторона: решение переименовали, а сценарий остался. Он не мешает,
 // но описывает то, чего нет, и однажды его прочтут как задание.
 const stale = Object.keys(scenarios).filter(
