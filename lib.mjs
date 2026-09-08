@@ -94,3 +94,8 @@ export const agentText = (payload) => {
 /** Ошибка протокола: без этого неверный конверт выглядел как успешная отправка. */
 export const agentError = (payload) =>
   payload?.error?.message ?? payload?.error?.status ?? undefined;
+
+export const snapshotShape = (json) =>
+  Array.isArray(json?.running) || typeof json?.phase === 'string'
+    ? 'ok'
+    : {error: 'форма снимка не распознана', keys: Object.keys(json ?? {})};

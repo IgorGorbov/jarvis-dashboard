@@ -1,6 +1,6 @@
 import {test} from 'node:test';
 import assert from 'node:assert/strict';
-import {agentError, agentText, normalizeOutcome, parseRun, runSummary, splitRunDir} from './lib.mjs';
+import {agentError, agentText, normalizeOutcome, parseRun, runSummary, snapshotShape, splitRunDir} from './lib.mjs';
 
 test('splitRunDir делит по первому дефису, а не по последнему', () => {
   assert.deepEqual(splitRunDir('aa940ed9-FM-6324'), {
@@ -118,6 +118,31 @@ test('текст агента: формы, снятые с живого аген
   assert.equal(agentText({result: {parts: [{content: {value: 'PR открыт'}}]}}), 'PR открыт');
   assert.equal(agentText(undefined), undefined);
   assert.equal(agentText({result: {message: {parts: []}}}), undefined);
+});
+
+test('форма снимка: старая и новая узнаются, мусор — нет', () => {
+  assert.equal(snapshotShape({phase: 'idle', waiting: []}), 'ok');
+  assert.equal(
+    snapshotShape({
+      phase: 'active',
+      active: {taskRef: 'FM-1', runTag: 'a', since: '2026-09-08T10:00:00Z', deadlineAt: 1},
+      waiting: [],
+    }),
+    'ok',
+  );
+  assert.equal(
+    snapshotShape({
+      phase: 'active',
+      running: [
+        {taskRef: 'FM-1', runTag: 'a', since: '2026-09-08T10:00:00Z', deadlineAt: 1},
+        {taskRef: 'FM-2', runTag: 'b', since: '2026-09-08T10:05:00Z', deadlineAt: 2},
+      ],
+      waiting: [],
+    }),
+    'ok',
+  );
+  assert.deepEqual(snapshotShape({foo: 1}), {error: 'форма снимка не распознана', keys: ['foo']});
+  assert.deepEqual(snapshotShape({}), {error: 'форма снимка не распознана', keys: []});
 });
 
 test('ошибка протокола не выглядит успешной отправкой', () => {

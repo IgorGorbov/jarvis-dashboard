@@ -5,7 +5,7 @@ import {readFile, readdir, stat, open, writeFile} from 'node:fs/promises';
 import crypto from 'node:crypto';
 import path from 'node:path';
 import {fileURLToPath} from 'node:url';
-import {agentError, agentText, parseRun, runSummary, splitRunDir} from './lib.mjs';
+import {agentError, agentText, parseRun, runSummary, snapshotShape, splitRunDir} from './lib.mjs';
 
 const HERE = path.dirname(fileURLToPath(import.meta.url));
 // Порядок: аргумент → переменная окружения (в том числе из `.env`) → сосед по
@@ -431,7 +431,9 @@ const serve = async (req, res) => {
     }
     case '/api/state': {
       const snapshot = await readJson(path.join(ROOT, 'state.json'));
-      return sendJson(res, snapshot ?? {phase: 'unknown'});
+      if (snapshot == null) return sendJson(res, {missing: true});
+      const shape = snapshotShape(snapshot);
+      return sendJson(res, shape === 'ok' ? snapshot : shape);
     }
     case '/api/pending':
       return sendJson(res, await pendingRuns());

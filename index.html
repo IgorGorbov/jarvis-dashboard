@@ -299,6 +299,7 @@ const KIND_WAIT = new Set([
 const events = [];
 let runs = [];
 let snapshot = {phase: 'unknown'};
+const runningOf = (s) => s.running ?? (s.active ? [s.active] : []);
 let selected = null;
 let detail = null;
 let railSignature = '';
@@ -459,7 +460,7 @@ function renderStrip() {
     return starts > ends;
   });
   const lastStage = [...rows].reverse().find((e) => e.stage)?.stage;
-  const running = snapshot.active?.runTag === selected && !stopped
+  const running = runningOf(snapshot).some((r) => r.runTag === selected) && !stopped
     ? open[open.length - 1] ?? NEXT[lastGo?.go] ?? lastStage ?? 'analyze'
     : undefined;
 
@@ -531,8 +532,8 @@ function renderStrip() {
  * и «сколько осталось» — это его цифры, а не наши догадки по первому событию.
  */
 function renderBudget(runningStage) {
-  const active = snapshot.active;
-  if (!active || active.runTag !== selected || !active.since || !active.deadlineAt) {
+  const active = runningOf(snapshot).find((r) => r.runTag === selected);
+  if (!active?.since || !active.deadlineAt) {
     el('budget').innerHTML = '';
     return;
   }
@@ -682,8 +683,7 @@ function renderRail() {
  * срока. В файле прогона она есть, но снимок отвечает быстрее и точно про то,
  * что работает прямо сейчас.
  */
-const active = (run) =>
-  snapshot.active?.runTag === run.runTag ? snapshot.active.model : undefined;
+const active = (run) => runningOf(snapshot).find((r) => r.runTag === run.runTag)?.model;
 
 function renderSide() {
   if (!detail) { el('side').innerHTML = '<div class="label">Артефакты</div>'; return; }
@@ -803,18 +803,24 @@ function view(which) {
 /* ---------- состояние ---------- */
 
 function renderState() {
-  const active = snapshot.active;
+  const running = runningOf(snapshot);
   const waiting = snapshot.waiting?.length ?? 0;
-  el('state').innerHTML = active
-    ? `<i class="dot on"></i> работает · <b>${esc(active.taskRef)}</b> · ${esc(active.runTag)}` +
-      (waiting ? ` · ждут ответа: ${waiting}` : '')
-    : `<i class="dot"></i> свободен` + (waiting ? ` · ждут ответа: ${waiting}` : '');
-  el('start-open').disabled = Boolean(active);
+  const tail = waiting ? ` · ждут ответа: ${waiting}` : '';
+  el('state').innerHTML = snapshot.missing
+    ? '<i class="dot"></i> снимка нет'
+    : snapshot.error
+      ? `<i class="dot" style="background:var(--bad)"></i> <span style="color:var(--bad)">${esc(snapshot.error)}${
+          snapshot.keys?.length ? ': ' + esc(snapshot.keys.join(', ')) : ''
+        }</span>`
+      : running.length
+        ? running
+            .map((r) => `<i class="dot on"></i> работает · <b>${esc(r.taskRef)}</b> · ${esc(r.runTag)}`)
+            .join(', ') + tail
+        : `<i class="dot"></i> свободен` + tail;
+  const mine = running.find((r) => r.runTag === selected);
   const stop = el('stop');
-  stop.disabled = !active;
-  stop.title = active
-    ? `отменить ${active.taskRef} — прогон будет остановлен`
-    : 'нечего отменять';
+  stop.disabled = !mine;
+  stop.title = mine ? `отменить ${mine.taskRef} — прогон будет остановлен` : 'нечего отменять';
 }
 
 /* ---------- загрузка ---------- */
@@ -826,6 +832,7 @@ async function select(tag) {
   view('feed');
   renderRail();
   renderStrip();
+  renderState();
   renderFeed();
   detail = null;
   renderSide();
@@ -868,7 +875,7 @@ let pending = [];
 function awaitingConfirmation() {
   return pending
     .map((p) => ({...(runs.find((r) => r.runTag === p.runTag) ?? {runTag: p.runTag, taskRef: '—'}), text: p.text}))
-    .filter((run) => run.taskRef !== snapshot.active?.taskRef);
+    .filter((run) => !runningOf(snapshot).some((r) => r.taskRef === run.taskRef));
 }
 
 async function renderAsked() {
@@ -919,10 +926,7 @@ async function renderAsked() {
       ? `<p>${esc(retold(run))}</p>`
       : '<p class="hint">пересказ не записан в исход прогона</p>'}
     <div class="foot">
-      <button type="button" class="primary" data-confirm="${esc(run.runTag)}"
-        ${snapshot.active
-          ? `disabled title="агент занят задачей ${esc(snapshot.active.taskRef)} — подтвердить можно, когда она закончится"`
-          : ''}>Подтвердить понимание</button>
+      <button type="button" class="primary" data-confirm="${esc(run.runTag)}">Подтвердить понимание</button>
       <span class="hint" data-note="${esc(run.runTag)}"></span>
     </div>
   </div>`);
@@ -1091,9 +1095,9 @@ for (const tab of document.querySelectorAll('.tab')) {
 }
 
 el('stop').onclick = () => {
-  const active = snapshot.active;
-  if (!active) return;
-  cancel(active.taskRef, `Отменить ${active.taskRef}? Прогон будет остановлен.`);
+  const mine = runningOf(snapshot).find((r) => r.runTag === selected);
+  if (!mine) return;
+  cancel(mine.taskRef, `Отменить ${mine.taskRef}? Прогон будет остановлен.`);
 };
 
 setupToggle('toggle-rail', 'rail', 'panel.rail');
@@ -1124,7 +1128,7 @@ el('start-form').onsubmit = async (submit) => {
 setInterval(loadState, 2000);
 // Счётчик ходов живой: трасса растёт по ходу шага.
 const pollTurns = async () => {
-  if (!selected || snapshot.active?.runTag !== selected) { turnsNow = undefined; return; }
+  if (!runningOf(snapshot).some((r) => r.runTag === selected)) { turnsNow = undefined; return; }
   try {
     const seen = await (await fetch(`/api/turns?tag=${encodeURIComponent(selected)}`)).json();
     turnsNow = seen.turns;
