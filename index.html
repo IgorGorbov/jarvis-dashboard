@@ -270,11 +270,11 @@ const STOP = new Set([
   'classify-failed', 'not-a-task', 'busy',
 ]);
 const GOOD = new Set([
-  'plan-ready', 'code-written', 'pr-meta-reused', 'checks-green', 'approved',
+  'plan-ready', 'code-written', 'pr-meta-reused', 'checks-green', 'nothing-to-check', 'approved',
   'pr-opened', 'answer', 'accepted',
 ]);
 // Куда прогон идёт после решения — из самого решения, а не из догадок по истории.
-const NEXT = {proceed: 'prepare', checks: 'check', review: 'review', retry: 'implement', publish: 'pr'};
+const NEXT = {proceed: 'prepare', checks: 'check', review: 'review', retry: 'implement', publish: 'pr', pr: 'pr'};
 // Эти шаги выполняются один раз, поэтому «зелёный» для них правда. Шаги петли
 // завершаются на каждой попытке, и зелёный по факту завершения означал бы, что
 // после трёх кругов пройдено всё.
@@ -299,6 +299,7 @@ const KIND_WAIT = new Set([
 const events = [];
 let runs = [];
 let snapshot = {phase: 'unknown'};
+const runningOf = (s) => s.running ?? (s.active ? [s.active] : []);
 let selected = null;
 let detail = null;
 let railSignature = '';
@@ -375,16 +376,17 @@ const prLink = (url, text, about) =>
       title="${esc(about ? about + '. ' : '')}клик — скопировать, ⌘/Ctrl+клик — открыть">${esc(text)}</a>`;
 
 document.addEventListener('click', (click) => {
-  const link = click.target.closest?.('a[data-copy]');
+  const link = click.target.closest?.('[data-copy]');
   if (!link || click.metaKey || click.ctrlKey || click.shiftKey) return;
   click.preventDefault();
+  const text = link.dataset.copy || link.href;
   const was = link.textContent;
-  navigator.clipboard.writeText(link.href).then(
+  navigator.clipboard.writeText(text).then(
     () => {
       link.textContent = 'скопировано';
       setTimeout(() => { link.textContent = was; }, 900);
     },
-    () => window.open(link.href, '_blank', 'noreferrer'),
+    () => { if (link.href) window.open(link.href, '_blank', 'noreferrer'); },
   );
 });
 const tone = (id) =>
@@ -459,7 +461,7 @@ function renderStrip() {
     return starts > ends;
   });
   const lastStage = [...rows].reverse().find((e) => e.stage)?.stage;
-  const running = snapshot.active?.runTag === selected && !stopped
+  const running = runningOf(snapshot).some((r) => r.runTag === selected) && !stopped
     ? open[open.length - 1] ?? NEXT[lastGo?.go] ?? lastStage ?? 'analyze'
     : undefined;
 
@@ -531,8 +533,8 @@ function renderStrip() {
  * и «сколько осталось» — это его цифры, а не наши догадки по первому событию.
  */
 function renderBudget(runningStage) {
-  const active = snapshot.active;
-  if (!active || active.runTag !== selected || !active.since || !active.deadlineAt) {
+  const active = runningOf(snapshot).find((r) => r.runTag === selected);
+  if (!active?.since || !active.deadlineAt) {
     el('budget').innerHTML = '';
     return;
   }
@@ -682,18 +684,22 @@ function renderRail() {
  * срока. В файле прогона она есть, но снимок отвечает быстрее и точно про то,
  * что работает прямо сейчас.
  */
-const active = (run) =>
-  snapshot.active?.runTag === run.runTag ? snapshot.active.model : undefined;
+const active = (run) => runningOf(snapshot).find((r) => r.runTag === run.runTag)?.model;
 
 function renderSide() {
   if (!detail) { el('side').innerHTML = '<div class="label">Артефакты</div>'; return; }
-  const {run, rows, files} = detail;
+  const {run, rows, files, root} = detail;
+  // Путь пишет сервер: у смотрящего дом может быть другой, поэтому сокращаем
+  // только то, что действительно совпало с началом.
+  const short = (p) => p.replace(/^\/(?:Users|home)\/[^/]+\//, '~/');
   const of = (kind) => rows.filter((r) => r.kind === kind);
   const last = (kind) => of(kind)[of(kind).length - 1];
   const cards = [];
 
   cards.push(`<div class="card"><h4>${esc(run.runTag)} · ${esc(run.taskRef)}</h4>
     <p>${esc(run.model ?? active(run) ?? 'модель не записана')}</p>
+    ${root ? `<p style="color:var(--dim)">worktree <span class="mono" data-copy="${esc(root)}"
+      title="клик — скопировать полный путь" style="cursor:pointer;text-decoration:underline;text-underline-offset:2px">${esc(short(root))}</span></p>` : ''}
     ${run.continues ? `<p style="color:var(--dim)">продолжает разбор прогона ${esc(run.continues)}</p>` : ''}
     ${run.resumed ? '<p style="color:var(--warn)">прогон продолжался после ответа</p>' : ''}</div>`);
 
@@ -803,18 +809,24 @@ function view(which) {
 /* ---------- состояние ---------- */
 
 function renderState() {
-  const active = snapshot.active;
+  const running = runningOf(snapshot);
   const waiting = snapshot.waiting?.length ?? 0;
-  el('state').innerHTML = active
-    ? `<i class="dot on"></i> работает · <b>${esc(active.taskRef)}</b> · ${esc(active.runTag)}` +
-      (waiting ? ` · ждут ответа: ${waiting}` : '')
-    : `<i class="dot"></i> свободен` + (waiting ? ` · ждут ответа: ${waiting}` : '');
-  el('start-open').disabled = Boolean(active);
+  const tail = waiting ? ` · ждут ответа: ${waiting}` : '';
+  el('state').innerHTML = snapshot.missing
+    ? '<i class="dot"></i> снимка нет'
+    : snapshot.error
+      ? `<i class="dot" style="background:var(--bad)"></i> <span style="color:var(--bad)">${esc(snapshot.error)}${
+          snapshot.keys?.length ? ': ' + esc(snapshot.keys.join(', ')) : ''
+        }</span>`
+      : running.length
+        ? running
+            .map((r) => `<i class="dot on"></i> работает · <b>${esc(r.taskRef)}</b> · ${esc(r.runTag)}`)
+            .join(', ') + tail
+        : `<i class="dot"></i> свободен` + tail;
+  const mine = running.find((r) => r.runTag === selected);
   const stop = el('stop');
-  stop.disabled = !active;
-  stop.title = active
-    ? `отменить ${active.taskRef} — прогон будет остановлен`
-    : 'нечего отменять';
+  stop.disabled = !mine;
+  stop.title = mine ? `отменить ${mine.taskRef} — прогон будет остановлен` : 'нечего отменять';
 }
 
 /* ---------- загрузка ---------- */
@@ -826,6 +838,7 @@ async function select(tag) {
   view('feed');
   renderRail();
   renderStrip();
+  renderState();
   renderFeed();
   detail = null;
   renderSide();
@@ -868,7 +881,7 @@ let pending = [];
 function awaitingConfirmation() {
   return pending
     .map((p) => ({...(runs.find((r) => r.runTag === p.runTag) ?? {runTag: p.runTag, taskRef: '—'}), text: p.text}))
-    .filter((run) => run.taskRef !== snapshot.active?.taskRef);
+    .filter((run) => !runningOf(snapshot).some((r) => r.taskRef === run.taskRef));
 }
 
 async function renderAsked() {
@@ -919,10 +932,7 @@ async function renderAsked() {
       ? `<p>${esc(retold(run))}</p>`
       : '<p class="hint">пересказ не записан в исход прогона</p>'}
     <div class="foot">
-      <button type="button" class="primary" data-confirm="${esc(run.runTag)}"
-        ${snapshot.active
-          ? `disabled title="агент занят задачей ${esc(snapshot.active.taskRef)} — подтвердить можно, когда она закончится"`
-          : ''}>Подтвердить понимание</button>
+      <button type="button" class="primary" data-confirm="${esc(run.runTag)}">Подтвердить понимание</button>
       <span class="hint" data-note="${esc(run.runTag)}"></span>
     </div>
   </div>`);
@@ -1091,9 +1101,9 @@ for (const tab of document.querySelectorAll('.tab')) {
 }
 
 el('stop').onclick = () => {
-  const active = snapshot.active;
-  if (!active) return;
-  cancel(active.taskRef, `Отменить ${active.taskRef}? Прогон будет остановлен.`);
+  const mine = runningOf(snapshot).find((r) => r.runTag === selected);
+  if (!mine) return;
+  cancel(mine.taskRef, `Отменить ${mine.taskRef}? Прогон будет остановлен.`);
 };
 
 setupToggle('toggle-rail', 'rail', 'panel.rail');
@@ -1124,7 +1134,7 @@ el('start-form').onsubmit = async (submit) => {
 setInterval(loadState, 2000);
 // Счётчик ходов живой: трасса растёт по ходу шага.
 const pollTurns = async () => {
-  if (!selected || snapshot.active?.runTag !== selected) { turnsNow = undefined; return; }
+  if (!runningOf(snapshot).some((r) => r.runTag === selected)) { turnsNow = undefined; return; }
   try {
     const seen = await (await fetch(`/api/turns?tag=${encodeURIComponent(selected)}`)).json();
     turnsNow = seen.turns;

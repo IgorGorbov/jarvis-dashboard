@@ -94,3 +94,23 @@ export const agentText = (payload) => {
 /** Ошибка протокола: без этого неверный конверт выглядел как успешная отправка. */
 export const agentError = (payload) =>
   payload?.error?.message ?? payload?.error?.status ?? undefined;
+
+export const snapshotShape = (json) =>
+  Array.isArray(json?.running) || typeof json?.phase === 'string'
+    ? 'ok'
+    : {error: 'форма снимка не распознана', keys: Object.keys(json ?? {})};
+
+/**
+ * Корень worktree прогона — из трассы, а не из соглашения об именах: агент
+ * пишет абсолютные пути к файлам, которые читал. Обрезаем по сегменту с меткой
+ * прогона. У прогонов до worktree метки в пути нет, и корня не будет.
+ */
+export const worktreeRoot = (tools, runTag) => {
+  for (const {target} of tools ?? []) {
+    if (typeof target !== 'string' || !target.startsWith('/')) continue;
+    const parts = target.split('/');
+    const at = parts.findIndex((seg) => seg.includes(runTag));
+    if (at !== -1) return parts.slice(0, at + 1).join("/");
+  }
+  return undefined;
+};

@@ -1,6 +1,6 @@
 import {test} from 'node:test';
 import assert from 'node:assert/strict';
-import {agentError, agentText, normalizeOutcome, parseRun, runSummary, splitRunDir} from './lib.mjs';
+import {agentError, agentText, normalizeOutcome, parseRun, runSummary, snapshotShape, splitRunDir, worktreeRoot} from './lib.mjs';
 
 test('splitRunDir делит по первому дефису, а не по последнему', () => {
   assert.deepEqual(splitRunDir('aa940ed9-FM-6324'), {
@@ -120,6 +120,31 @@ test('текст агента: формы, снятые с живого аген
   assert.equal(agentText({result: {message: {parts: []}}}), undefined);
 });
 
+test('форма снимка: старая и новая узнаются, мусор — нет', () => {
+  assert.equal(snapshotShape({phase: 'idle', waiting: []}), 'ok');
+  assert.equal(
+    snapshotShape({
+      phase: 'active',
+      active: {taskRef: 'FM-1', runTag: 'a', since: '2026-09-08T10:00:00Z', deadlineAt: 1},
+      waiting: [],
+    }),
+    'ok',
+  );
+  assert.equal(
+    snapshotShape({
+      phase: 'active',
+      running: [
+        {taskRef: 'FM-1', runTag: 'a', since: '2026-09-08T10:00:00Z', deadlineAt: 1},
+        {taskRef: 'FM-2', runTag: 'b', since: '2026-09-08T10:05:00Z', deadlineAt: 2},
+      ],
+      waiting: [],
+    }),
+    'ok',
+  );
+  assert.deepEqual(snapshotShape({foo: 1}), {error: 'форма снимка не распознана', keys: ['foo']});
+  assert.deepEqual(snapshotShape({}), {error: 'форма снимка не распознана', keys: []});
+});
+
 test('ошибка протокола не выглядит успешной отправкой', () => {
   // Ровно тот отказ, на который панель отвечала «отправлено».
   assert.equal(
@@ -131,4 +156,24 @@ test('ошибка протокола не выглядит успешной о�
   );
   assert.equal(agentError({error: {code: 400, status: 'FAILED_PRECONDITION'}}), 'FAILED_PRECONDITION');
   assert.equal(agentError({result: {message: {parts: []}}}), undefined);
+});
+
+test('корень worktree: берётся из трассы, у старых прогонов его нет', () => {
+  const tools = [
+    {tool: 'Read', target: '/Users/igor/profi/jarvis/worktrees/no-task-jarvis-8e30dcf8/package.json'},
+    {tool: 'Grep', target: '/Users/igor/profi/jarvis/worktrees/no-task-jarvis-8e30dcf8/src/index.ts'},
+  ];
+  assert.equal(
+    worktreeRoot(tools, '8e30dcf8'),
+    '/Users/igor/profi/jarvis/worktrees/no-task-jarvis-8e30dcf8',
+  );
+  // До worktree агент работал в одном клоне: метки прогона в пути нет.
+  assert.equal(
+    worktreeRoot([{tool: 'Read', target: '/Users/igor/profi/mono-front/README.md'}], '8e30dcf8'),
+    undefined,
+  );
+  assert.equal(worktreeRoot([], '8e30dcf8'), undefined);
+  assert.equal(worktreeRoot(undefined, '8e30dcf8'), undefined);
+  // Относительные цели и маркеры хода в трассе перемешаны с вызовами.
+  assert.equal(worktreeRoot([{turn: 1}, {tool: 'Read', target: 'package.json'}], '8e30dcf8'), undefined);
 });
