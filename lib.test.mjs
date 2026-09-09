@@ -1,6 +1,6 @@
 import {test} from 'node:test';
 import assert from 'node:assert/strict';
-import {agentError, agentText, normalizeOutcome, parseRun, runSummary, snapshotShape, splitRunDir} from './lib.mjs';
+import {agentError, agentText, normalizeOutcome, parseRun, runSummary, snapshotShape, splitRunDir, worktreeRoot} from './lib.mjs';
 
 test('splitRunDir делит по первому дефису, а не по последнему', () => {
   assert.deepEqual(splitRunDir('aa940ed9-FM-6324'), {
@@ -156,4 +156,24 @@ test('ошибка протокола не выглядит успешной о�
   );
   assert.equal(agentError({error: {code: 400, status: 'FAILED_PRECONDITION'}}), 'FAILED_PRECONDITION');
   assert.equal(agentError({result: {message: {parts: []}}}), undefined);
+});
+
+test('корень worktree: берётся из трассы, у старых прогонов его нет', () => {
+  const tools = [
+    {tool: 'Read', target: '/Users/igor/profi/jarvis/worktrees/no-task-jarvis-8e30dcf8/package.json'},
+    {tool: 'Grep', target: '/Users/igor/profi/jarvis/worktrees/no-task-jarvis-8e30dcf8/src/index.ts'},
+  ];
+  assert.equal(
+    worktreeRoot(tools, '8e30dcf8'),
+    '/Users/igor/profi/jarvis/worktrees/no-task-jarvis-8e30dcf8',
+  );
+  // До worktree агент работал в одном клоне: метки прогона в пути нет.
+  assert.equal(
+    worktreeRoot([{tool: 'Read', target: '/Users/igor/profi/mono-front/README.md'}], '8e30dcf8'),
+    undefined,
+  );
+  assert.equal(worktreeRoot([], '8e30dcf8'), undefined);
+  assert.equal(worktreeRoot(undefined, '8e30dcf8'), undefined);
+  // Относительные цели и маркеры хода в трассе перемешаны с вызовами.
+  assert.equal(worktreeRoot([{turn: 1}, {tool: 'Read', target: 'package.json'}], '8e30dcf8'), undefined);
 });

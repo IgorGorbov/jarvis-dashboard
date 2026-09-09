@@ -5,7 +5,7 @@ import {readFile, readdir, stat, open, writeFile} from 'node:fs/promises';
 import crypto from 'node:crypto';
 import path from 'node:path';
 import {fileURLToPath} from 'node:url';
-import {agentError, agentText, parseRun, runSummary, snapshotShape, splitRunDir} from './lib.mjs';
+import {agentError, agentText, parseRun, runSummary, snapshotShape, splitRunDir, worktreeRoot} from './lib.mjs';
 
 const HERE = path.dirname(fileURLToPath(import.meta.url));
 // Порядок: аргумент → переменная окружения (в том числе из `.env`) → сосед по
@@ -195,7 +195,13 @@ const runDetail = async (tag) => {
   }
   const rows = parseRun(await readText(path.join(dir, 'run.jsonl')));
   const {tools, ...totals} = await traceTotals(dir);
-  return {run, files: names.sort(), rows, ...totals};
+  return {
+    run,
+    files: names.sort(),
+    rows,
+    root: worktreeRoot(tools, tag),
+    ...totals,
+  };
 };
 
 /**

@@ -270,11 +270,11 @@ const STOP = new Set([
   'classify-failed', 'not-a-task', 'busy',
 ]);
 const GOOD = new Set([
-  'plan-ready', 'code-written', 'pr-meta-reused', 'checks-green', 'approved',
+  'plan-ready', 'code-written', 'pr-meta-reused', 'checks-green', 'nothing-to-check', 'approved',
   'pr-opened', 'answer', 'accepted',
 ]);
 // Куда прогон идёт после решения — из самого решения, а не из догадок по истории.
-const NEXT = {proceed: 'prepare', checks: 'check', review: 'review', retry: 'implement', publish: 'pr'};
+const NEXT = {proceed: 'prepare', checks: 'check', review: 'review', retry: 'implement', publish: 'pr', pr: 'pr'};
 // Эти шаги выполняются один раз, поэтому «зелёный» для них правда. Шаги петли
 // завершаются на каждой попытке, и зелёный по факту завершения означал бы, что
 // после трёх кругов пройдено всё.
@@ -376,16 +376,17 @@ const prLink = (url, text, about) =>
       title="${esc(about ? about + '. ' : '')}клик — скопировать, ⌘/Ctrl+клик — открыть">${esc(text)}</a>`;
 
 document.addEventListener('click', (click) => {
-  const link = click.target.closest?.('a[data-copy]');
+  const link = click.target.closest?.('[data-copy]');
   if (!link || click.metaKey || click.ctrlKey || click.shiftKey) return;
   click.preventDefault();
+  const text = link.dataset.copy || link.href;
   const was = link.textContent;
-  navigator.clipboard.writeText(link.href).then(
+  navigator.clipboard.writeText(text).then(
     () => {
       link.textContent = 'скопировано';
       setTimeout(() => { link.textContent = was; }, 900);
     },
-    () => window.open(link.href, '_blank', 'noreferrer'),
+    () => { if (link.href) window.open(link.href, '_blank', 'noreferrer'); },
   );
 });
 const tone = (id) =>
@@ -687,13 +688,18 @@ const active = (run) => runningOf(snapshot).find((r) => r.runTag === run.runTag)
 
 function renderSide() {
   if (!detail) { el('side').innerHTML = '<div class="label">Артефакты</div>'; return; }
-  const {run, rows, files} = detail;
+  const {run, rows, files, root} = detail;
+  // Путь пишет сервер: у смотрящего дом может быть другой, поэтому сокращаем
+  // только то, что действительно совпало с началом.
+  const short = (p) => p.replace(/^\/(?:Users|home)\/[^/]+\//, '~/');
   const of = (kind) => rows.filter((r) => r.kind === kind);
   const last = (kind) => of(kind)[of(kind).length - 1];
   const cards = [];
 
   cards.push(`<div class="card"><h4>${esc(run.runTag)} · ${esc(run.taskRef)}</h4>
     <p>${esc(run.model ?? active(run) ?? 'модель не записана')}</p>
+    ${root ? `<p style="color:var(--dim)">worktree <span class="mono" data-copy="${esc(root)}"
+      title="клик — скопировать полный путь" style="cursor:pointer;text-decoration:underline;text-underline-offset:2px">${esc(short(root))}</span></p>` : ''}
     ${run.continues ? `<p style="color:var(--dim)">продолжает разбор прогона ${esc(run.continues)}</p>` : ''}
     ${run.resumed ? '<p style="color:var(--warn)">прогон продолжался после ответа</p>' : ''}</div>`);
 
